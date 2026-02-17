@@ -4,9 +4,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getLoginUrl } from "@/const";
 import { Link } from "wouter";
 import { Sparkles, FileText, ClipboardList, BookText, Mic, MessageSquare, ArrowRight } from "lucide-react";
+import { useEffect } from "react";
 
 export default function Home() {
   const { user, loading, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    // Set page title for SEO
+    document.title = "K12智能教学资源生成平台 - AI驱动的教师备课助手";
+  }, []);
 
   if (loading) {
     return (
@@ -24,7 +30,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
-      <section className="relative overflow-hidden">
+      <header className="relative overflow-hidden" role="banner">
         {/* Geometric accent background */}
         <div className="absolute top-20 right-20 w-96 h-96 rounded-full bg-gradient-to-br from-primary/10 to-secondary/10 blur-3xl" />
         <div className="absolute bottom-20 left-20 w-80 h-80 rounded-full bg-gradient-to-tr from-secondary/10 to-primary/10 blur-3xl" />
@@ -45,15 +51,15 @@ export default function Home() {
             </div>
           </div>
         </div>
-      </section>
+      </header>
 
       {/* Features Section */}
-      <section className="py-24 lg:py-32 bg-card/50">
+      <main className="py-24 lg:py-32 bg-card/50" role="main">
         <div className="container">
           <div className="text-center mb-16">
             <h2 className="text-4xl lg:text-5xl font-black mb-4">AI生成功能</h2>
             <p className="text-lg text-muted-foreground font-light max-w-2xl mx-auto">
-              五大核心功能，满足教师日常教学资源准备的全部需求
+              八大核心功能，满足教师日常教学资源准备的全部需求
             </p>
           </div>
 
@@ -71,7 +77,7 @@ export default function Home() {
             <FeatureCard
               icon={<BookText className="w-8 h-8" />}
               title="教学设计"
-              description="根据课程主题生成完整的教学设计，包括教学目标、教学过程和板书设计"
+              description="支持普通教学设计和大单元教学设计，生成完整的教学目标、教学过程和板书设计"
             />
             <FeatureCard
               icon={<Mic className="w-8 h-8" />}
@@ -84,13 +90,23 @@ export default function Home() {
               description="生成包含教材分析、学情分析、教学方法等完整的说课稿"
             />
             <FeatureCard
+              icon={<ClipboardList className="w-8 h-8" />}
+              title="作业设计"
+              description="智能生成分层作业，包括基础题、提高题和拓展题，满足不同学生需求"
+            />
+            <FeatureCard
+              icon={<FileText className="w-8 h-8" />}
+              title="试题设计"
+              description="专业的试题设计工具，生成高质量试题及详细解析"
+            />
+            <FeatureCard
               icon={<Sparkles className="w-8 h-8" />}
               title="知识库支持"
-              description="上传参考资料，AI将结合知识库内容生成更精准的教学资源"
+              description="上传PDF教材和教辅资料，AI将结合知识库内容生成更精准的教学资源"
             />
           </div>
         </div>
-      </section>
+      </main>
 
       {/* CTA Section */}
       <section className="py-24 lg:py-32">
@@ -114,7 +130,7 @@ export default function Home() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-12">
+      <footer className="border-t border-border py-12" role="contentinfo">
         <div className="container">
           <div className="text-center text-sm text-muted-foreground font-light">
             <p>© 2026 智教云. All rights reserved.</p>
