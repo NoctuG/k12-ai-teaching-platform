@@ -78,7 +78,7 @@ export const appRouter = router({
   generation: router({
     generate: protectedProcedure
       .input(z.object({
-        resourceType: z.enum(["courseware", "exam", "lesson_plan", "transcript", "lecture_script"]),
+        resourceType: z.enum(["courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design"]),
         title: z.string(),
         prompt: z.string(),
         parameters: z.record(z.string(), z.any()).optional(),
@@ -177,6 +177,43 @@ export const appRouter = router({
       return await db.getPublicTemplates();
     }),
 
+    myTemplates: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getUserTemplates(ctx.user.id);
+    }),
+
+    upload: protectedProcedure
+      .input(z.object({
+        resourceType: z.enum(["courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design"]),
+        title: z.string(),
+        description: z.string().optional(),
+        content: z.string(),
+        subject: z.string().optional(),
+        grade: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.createTemplate({
+          resourceType: input.resourceType,
+          title: input.title,
+          description: input.description,
+          content: input.content,
+          subject: input.subject,
+          grade: input.grade,
+          tags: input.tags,
+          isPublic: 0,
+          createdBy: ctx.user.id,
+          isUserUploaded: 1,
+        });
+        return { success: true };
+      }),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.deleteTemplate(input.id, ctx.user.id);
+        return { success: true };
+      }),
+
     getById: publicProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
@@ -261,6 +298,49 @@ function getSystemPromptForResourceType(resourceType: string): string {
 - 分析深入透彻
 - 逻辑清晰严谨
 - 体现教学理念`,
+
+    lesson_plan_unit: `你是一位资深的K12教育专家，擅长编写大单元教学设计。请根据用户的要求生成完整的大单元教学设计，包括：
+1. 单元主题和核心素养目标
+2. 单元教学内容分析
+3. 学情分析
+4. 单元教学目标（知识、能力、素养）
+5. 单元教学重点和难点
+6. 单元教学课时安排（分课时设计）
+7. 单元评价方案
+8. 单元教学资源
+
+要求：
+- 体现大单元整体设计理念
+- 注重核心素养培养
+- 课时安排合理
+- 评价方式多元化`,
+
+    homework: `你是一位经验丰富的K12教师，擅长设计有效的作业。请根据用户的要求生成完整的作业设计，包括：
+1. 作业目标
+2. 作业内容（基础题、提高题、拓展题）
+3. 作业要求和完成时间
+4. 参考答案和评分标准
+5. 作业反馈建议
+
+要求：
+- 难度梯度合理
+- 题量适中
+- 注重能力培养
+- 体现分层教学`,
+
+    question_design: `你是一位专业的K12教师，擅长设计高质量的试题。请根据用户的要求生成完整的试题设计，包括：
+1. 试题题干
+2. 选项设计（如适用）
+3. 参考答案
+4. 解题思路和知识点分析
+5. 难度等级和考查目标
+6. 命题说明
+
+要求：
+- 题目表述清晰准确
+- 选项设计科学
+- 答案详细规范
+- 符合课程标准`,
   };
 
   return prompts[resourceType as keyof typeof prompts] || prompts.courseware;

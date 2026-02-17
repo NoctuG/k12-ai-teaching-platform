@@ -15,6 +15,13 @@
       "when": 1771303103453,
       "tag": "0001_simple_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1771304154568,
+      "tag": "0002_stiff_tusk",
+      "breakpoints": true
     }
   ]
 }

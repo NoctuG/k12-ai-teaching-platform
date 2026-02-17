@@ -50,8 +50,11 @@ export const resourceTypeEnum = mysqlEnum("resourceType", [
   "courseware", // 课件
   "exam", // 试卷
   "lesson_plan", // 教学设计
+  "lesson_plan_unit", // 大单元教学设计
   "transcript", // 逐字稿
   "lecture_script", // 说课稿
+  "homework", // 作业设计
+  "question_design", // 试题设计
 ]);
 
 /**
@@ -90,6 +93,7 @@ export const resourceTemplates = mysqlTable("resource_templates", {
   isPublic: int("isPublic").default(1).notNull(), // 1 = public, 0 = private
   createdBy: int("createdBy"), // User ID who created it (null for system templates)
   usageCount: int("usageCount").default(0).notNull(), // How many times used
+  isUserUploaded: int("isUserUploaded").default(0).notNull(), // 1 = user uploaded, 0 = system
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

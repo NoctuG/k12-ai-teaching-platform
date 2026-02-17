@@ -9,6 +9,7 @@ import Generate from "./pages/Generate";
 import History from "./pages/History";
 import Knowledge from "./pages/Knowledge";
 import Templates from "./pages/Templates";
+import MyTemplates from "./pages/MyTemplates";
 import Profile from "./pages/Profile";
 
 function Router() {
@@ -19,6 +20,7 @@ function Router() {
       <Route path={"/history"} component={History} />
       <Route path={"/knowledge"} component={Knowledge} />
       <Route path={"/templates"} component={Templates} />
+      <Route path={"/my-templates"} component={MyTemplates} />
       <Route path={"/profile"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

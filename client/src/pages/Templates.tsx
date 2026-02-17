@@ -12,16 +12,22 @@ const resourceTypeIcons = {
   courseware: <FileText className="w-5 h-5" />,
   exam: <ClipboardList className="w-5 h-5" />,
   lesson_plan: <BookText className="w-5 h-5" />,
+  lesson_plan_unit: <BookText className="w-5 h-5" />,
   transcript: <Mic className="w-5 h-5" />,
   lecture_script: <MessageSquare className="w-5 h-5" />,
+  homework: <ClipboardList className="w-5 h-5" />,
+  question_design: <FileText className="w-5 h-5" />,
 };
 
 const resourceTypeLabels = {
   courseware: "课件",
   exam: "试卷",
   lesson_plan: "教学设计",
+  lesson_plan_unit: "大单元教学设计",
   transcript: "逐字稿",
   lecture_script: "说课稿",
+  homework: "作业设计",
+  question_design: "试题设计",
 };
 
 export default function Templates() {

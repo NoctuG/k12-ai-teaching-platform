@@ -15,8 +15,11 @@ const resourceTypes = [
   { value: "courseware", label: "课件（PPT）" },
   { value: "exam", label: "试卷" },
   { value: "lesson_plan", label: "教学设计" },
+  { value: "lesson_plan_unit", label: "大单元教学设计" },
   { value: "transcript", label: "逐字稿" },
   { value: "lecture_script", label: "说课稿" },
+  { value: "homework", label: "作业设计" },
+  { value: "question_design", label: "试题设计" },
 ];
 
 export default function Generate() {

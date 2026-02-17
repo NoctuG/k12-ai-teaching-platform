@@ -1,0 +1,3 @@
+ALTER TABLE `generation_history` MODIFY COLUMN `resourceType` enum('courseware','exam','lesson_plan','lesson_plan_unit','transcript','lecture_script','homework','question_design') NOT NULL;--> statement-breakpoint
+ALTER TABLE `resource_templates` MODIFY COLUMN `resourceType` enum('courseware','exam','lesson_plan','lesson_plan_unit','transcript','lecture_script','homework','question_design') NOT NULL;--> statement-breakpoint
+ALTER TABLE `resource_templates` ADD `isUserUploaded` int DEFAULT 0 NOT NULL;

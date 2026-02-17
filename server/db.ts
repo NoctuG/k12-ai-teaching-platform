@@ -182,6 +182,28 @@ export async function getPublicTemplates() {
   return await db.select().from(resourceTemplates).where(eq(resourceTemplates.isPublic, 1)).orderBy(desc(resourceTemplates.usageCount));
 }
 
+export async function getUserTemplates(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(resourceTemplates).where(and(eq(resourceTemplates.createdBy, userId), eq(resourceTemplates.isUserUploaded, 1))).orderBy(desc(resourceTemplates.createdAt));
+}
+
+export async function createTemplate(template: InsertResourceTemplate) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(resourceTemplates).values(template);
+  return result;
+}
+
+export async function deleteTemplate(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(resourceTemplates).where(and(eq(resourceTemplates.id, id), eq(resourceTemplates.createdBy, userId)));
+}
+
 export async function getTemplateById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
