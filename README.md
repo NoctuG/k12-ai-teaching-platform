@@ -53,8 +53,8 @@ AI驱动的教学资源生成平台，帮助K12教师快速创建高质量的教
 - **Node.js** + Express
 - **tRPC** 服务端
 - **Drizzle ORM** + MySQL
-- **AWS S3** 文件存储
-- **Gemini 2.5 Flash** LLM集成
+- **S3 兼容对象存储**（AWS S3 / Cloudflare R2 / MinIO）
+- **Gemini 2.5 Flash**（支持可配置 Base URL 的 OpenAI-Compatible 接口）
 
 ## 项目结构
 
@@ -93,10 +93,29 @@ pnpm install
 创建 `.env` 文件并配置以下变量：
 
 ```env
+# 基础
 DATABASE_URL=mysql://user:password@localhost:3306/k12_platform
+JWT_SECRET=replace-with-a-strong-secret
+
+# LLM
+GEMINI_API_KEY=your_gemini_api_key
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+LLM_MODEL=gemini-2.5-flash
+
+# S3 兼容存储
 AWS_ACCESS_KEY_ID=your_access_key
 AWS_SECRET_ACCESS_KEY=your_secret_key
 AWS_S3_BUCKET=your_bucket_name
+AWS_REGION=auto
+S3_ENDPOINT=https://your-s3-endpoint   # MinIO/R2 场景必填
+S3_FORCE_PATH_STYLE=true
+S3_PUBLIC_BASE_URL=
+
+# 认证
+AUTH_PROVIDERS=local,github
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+ADMIN_EMAILS=admin@example.com
 ```
 
 ### 数据库迁移
@@ -133,3 +152,20 @@ pnpm start
 ## 许可证
 
 MIT
+
+## Docker 部署（推荐）
+
+```bash
+docker compose up -d --build
+```
+
+服务说明：
+- `app`: 主应用（3000）
+- `mysql`: MySQL 数据库（3306）
+- `minio`: S3 兼容对象存储（9000，控制台 9001）
+
+首次启动后请执行数据库迁移：
+
+```bash
+pnpm db:push
+```
