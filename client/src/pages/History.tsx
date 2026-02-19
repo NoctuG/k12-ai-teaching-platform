@@ -2,9 +2,11 @@ import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine } from "lucide-react";
+import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine, Star, Share2, Search, Filter, Gamepad2, GitBranch, Brain, Mail, Users, Lightbulb, GraduationCap, Trophy, CalendarRange, BookOpen } from "lucide-react";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
@@ -12,7 +14,7 @@ import { Streamdown } from "streamdown";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
 
-const resourceTypeIcons = {
+const resourceTypeIcons: Record<string, React.ReactNode> = {
   courseware: <FileText className="w-5 h-5" />,
   exam: <ClipboardList className="w-5 h-5" />,
   lesson_plan: <BookText className="w-5 h-5" />,
@@ -21,9 +23,21 @@ const resourceTypeIcons = {
   lecture_script: <MessageSquare className="w-5 h-5" />,
   homework: <ClipboardList className="w-5 h-5" />,
   question_design: <FileText className="w-5 h-5" />,
+  grading_rubric: <GraduationCap className="w-5 h-5" />,
+  learning_report: <Users className="w-5 h-5" />,
+  interactive_game: <Gamepad2 className="w-5 h-5" />,
+  discussion_chain: <GitBranch className="w-5 h-5" />,
+  mind_map: <Brain className="w-5 h-5" />,
+  parent_letter: <Mail className="w-5 h-5" />,
+  parent_meeting_speech: <Users className="w-5 h-5" />,
+  pbl_project: <Lightbulb className="w-5 h-5" />,
+  school_curriculum: <BookOpen className="w-5 h-5" />,
+  competition_questions: <Trophy className="w-5 h-5" />,
+  pacing_guide: <CalendarRange className="w-5 h-5" />,
+  differentiated_reading: <BookText className="w-5 h-5" />,
 };
 
-const resourceTypeLabels = {
+const resourceTypeLabels: Record<string, string> = {
   courseware: "课件",
   exam: "试卷",
   lesson_plan: "教学设计",
@@ -32,16 +46,28 @@ const resourceTypeLabels = {
   lecture_script: "说课稿",
   homework: "作业设计",
   question_design: "试题设计",
+  grading_rubric: "评分标准",
+  learning_report: "学情分析报告",
+  interactive_game: "互动游戏",
+  discussion_chain: "讨论话题/问题链",
+  mind_map: "思维导图",
+  parent_letter: "家长通知",
+  parent_meeting_speech: "家长会发言稿",
+  pbl_project: "PBL方案",
+  school_curriculum: "校本课程",
+  competition_questions: "竞赛题库",
+  pacing_guide: "教学进度表",
+  differentiated_reading: "分层阅读",
 };
 
-const statusLabels = {
+const statusLabels: Record<string, string> = {
   pending: "待处理",
   generating: "生成中",
   completed: "已完成",
   failed: "失败",
 };
 
-const statusColors = {
+const statusColors: Record<string, string> = {
   pending: "bg-yellow-500/10 text-yellow-700 dark:text-yellow-400",
   generating: "bg-blue-500/10 text-blue-700 dark:text-blue-400",
   completed: "bg-green-500/10 text-green-700 dark:text-green-400",
@@ -49,7 +75,16 @@ const statusColors = {
 };
 
 export default function History() {
-  const { data: history, isLoading, refetch } = trpc.generation.list.useQuery();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState<string>("all");
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
+  const { data: history, isLoading, refetch } = trpc.generation.search.useQuery({
+    search: searchQuery || undefined,
+    resourceType: filterType !== "all" ? filterType : undefined,
+    favoritesOnly: favoritesOnly || undefined,
+  });
+
   const [, setLocation] = useLocation();
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const { data: selectedHistory } = trpc.generation.getById.useQuery(
@@ -90,6 +125,20 @@ export default function History() {
     },
   });
 
+  const favoriteMutation = trpc.generation.toggleFavorite.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.isFavorite ? "已收藏" : "已取消收藏");
+      refetch();
+    },
+  });
+
+  const shareMutation = trpc.generation.toggleShare.useMutation({
+    onSuccess: (data) => {
+      toast.success(data.isShared ? "已开启共享" : "已关闭共享");
+      refetch();
+    },
+  });
+
   const handleDelete = (id: number) => {
     if (confirm("确定要删除这条记录吗？")) {
       deleteMutation.mutate({ id });
@@ -106,6 +155,39 @@ export default function History() {
           </p>
         </div>
 
+        {/* Search and Filter Bar */}
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="搜索标题或内容..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-full sm:w-48">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="筛选类型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部类型</SelectItem>
+              {Object.entries(resourceTypeLabels).map(([value, label]) => (
+                <SelectItem key={value} value={value}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant={favoritesOnly ? "default" : "outline"}
+            onClick={() => setFavoritesOnly(!favoritesOnly)}
+            className="shrink-0"
+          >
+            <Star className={`w-4 h-4 mr-1 ${favoritesOnly ? "fill-current" : ""}`} />
+            收藏
+          </Button>
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -113,7 +195,7 @@ export default function History() {
         ) : !history || history.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground font-light">
-              暂无生成记录
+              {searchQuery || filterType !== "all" || favoritesOnly ? "未找到匹配的记录" : "暂无生成记录"}
             </CardContent>
           </Card>
         ) : (
@@ -124,17 +206,29 @@ export default function History() {
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-3 flex-1">
                       <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                        {resourceTypeIcons[item.resourceType as keyof typeof resourceTypeIcons]}
+                        {resourceTypeIcons[item.resourceType] || <FileText className="w-5 h-5" />}
                       </div>
                       <div className="flex-1 min-w-0">
                         <CardTitle className="text-xl mb-2">{item.title}</CardTitle>
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant="outline">
-                            {resourceTypeLabels[item.resourceType as keyof typeof resourceTypeLabels]}
+                            {resourceTypeLabels[item.resourceType] || item.resourceType}
                           </Badge>
-                          <Badge className={statusColors[item.status as keyof typeof statusColors]}>
-                            {statusLabels[item.status as keyof typeof statusLabels]}
+                          <Badge className={statusColors[item.status] || ""}>
+                            {statusLabels[item.status] || item.status}
                           </Badge>
+                          {(item as any).isFavorite === 1 && (
+                            <Badge variant="outline" className="text-yellow-600 border-yellow-300">
+                              <Star className="w-3 h-3 mr-1 fill-current" />
+                              收藏
+                            </Badge>
+                          )}
+                          {(item as any).isShared === 1 && (
+                            <Badge variant="outline" className="text-blue-600 border-blue-300">
+                              <Share2 className="w-3 h-3 mr-1" />
+                              共享
+                            </Badge>
+                          )}
                           <span className="text-xs text-muted-foreground">
                             {format(new Date(item.createdAt), "PPP", { locale: zhCN })}
                           </span>
@@ -144,6 +238,22 @@ export default function History() {
                     <div className="flex gap-2 shrink-0">
                       {item.status === "completed" && (
                         <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => favoriteMutation.mutate({ id: item.id })}
+                            title={(item as any).isFavorite === 1 ? "取消收藏" : "收藏"}
+                          >
+                            <Star className={`w-4 h-4 ${(item as any).isFavorite === 1 ? "fill-yellow-500 text-yellow-500" : ""}`} />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => shareMutation.mutate({ id: item.id })}
+                            title={(item as any).isShared === 1 ? "取消共享" : "共享"}
+                          >
+                            <Share2 className={`w-4 h-4 ${(item as any).isShared === 1 ? "text-blue-500" : ""}`} />
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -226,6 +336,15 @@ export default function History() {
                   >
                     <Download className="w-4 h-4 mr-1" />
                     PPT
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "pdf" })}
+                    disabled={exportMutation.isPending}
+                  >
+                    <Download className="w-4 h-4 mr-1" />
+                    PDF
                   </Button>
                 </div>
               )}

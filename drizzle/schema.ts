@@ -55,6 +55,23 @@ export const resourceTypeEnum = mysqlEnum("resourceType", [
   "lecture_script", // 说课稿
   "homework", // 作业设计
   "question_design", // 试题设计
+  // 教学评估类
+  "grading_rubric", // 批改辅助/评分标准生成
+  "learning_report", // 学情分析报告
+  // 课堂互动类
+  "interactive_game", // 互动游戏设计
+  "discussion_chain", // 讨论话题/问题链设计
+  "mind_map", // 思维导图生成
+  // 家校沟通类
+  "parent_letter", // 家长通知/家长信
+  "parent_meeting_speech", // 家长会发言稿
+  // 跨学科/特殊场景
+  "pbl_project", // 项目式学习(PBL)方案
+  "school_curriculum", // 校本课程开发
+  "competition_questions", // 竞赛培训题库
+  // 教学深度
+  "pacing_guide", // 学期教学进度表
+  "differentiated_reading", // 分层阅读材料改写
 ]);
 
 /**
@@ -71,6 +88,9 @@ export const generationHistory = mysqlTable("generation_history", {
   knowledgeFileIds: json("knowledgeFileIds"), // Array of knowledge file IDs used
   status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
   errorMessage: text("errorMessage"), // Error message if failed
+  isFavorite: int("isFavorite").default(0).notNull(), // 1 = favorite, 0 = not
+  isShared: int("isShared").default(0).notNull(), // 1 = shared, 0 = private
+  shareToken: varchar("shareToken", { length: 64 }), // Unique share token for public access
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

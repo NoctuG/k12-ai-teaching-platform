@@ -1,4 +1,4 @@
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
 import { 
   InsertUser, 
@@ -260,4 +260,117 @@ export async function deleteStudentComment(id: number, userId: number) {
   if (!db) throw new Error("Database not available");
 
   await db.delete(studentComments).where(and(eq(studentComments.id, id), eq(studentComments.userId, userId)));
+}
+
+// Search & Filter Generation History
+export async function searchGenerationHistory(userId: number, options: {
+  search?: string;
+  resourceType?: string;
+  favoritesOnly?: boolean;
+}) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const conditions = [eq(generationHistory.userId, userId)];
+
+  if (options.resourceType) {
+    conditions.push(sql`${generationHistory.resourceType} = ${options.resourceType}`);
+  }
+
+  if (options.favoritesOnly) {
+    conditions.push(eq(generationHistory.isFavorite, 1));
+  }
+
+  if (options.search) {
+    const searchPattern = `%${options.search}%`;
+    conditions.push(
+      or(
+        like(generationHistory.title, searchPattern),
+        like(generationHistory.prompt, searchPattern),
+      )!
+    );
+  }
+
+  return await db.select()
+    .from(generationHistory)
+    .where(and(...conditions))
+    .orderBy(desc(generationHistory.createdAt));
+}
+
+// Toggle Favorite
+export async function toggleFavorite(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const record = await db.select()
+    .from(generationHistory)
+    .where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)))
+    .limit(1);
+
+  if (record.length === 0) throw new Error("记录不存在");
+
+  const newValue = record[0].isFavorite === 1 ? 0 : 1;
+  await db.update(generationHistory)
+    .set({ isFavorite: newValue })
+    .where(eq(generationHistory.id, id));
+
+  return newValue;
+}
+
+// Share/Unshare
+export async function toggleShare(id: number, userId: number, shareToken: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const record = await db.select()
+    .from(generationHistory)
+    .where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)))
+    .limit(1);
+
+  if (record.length === 0) throw new Error("记录不存在");
+
+  const isCurrentlyShared = record[0].isShared === 1;
+  await db.update(generationHistory)
+    .set({
+      isShared: isCurrentlyShared ? 0 : 1,
+      shareToken: isCurrentlyShared ? null : shareToken,
+    })
+    .where(eq(generationHistory.id, id));
+
+  return !isCurrentlyShared;
+}
+
+// Get shared resources (public browsing)
+export async function getSharedResources() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select({
+    id: generationHistory.id,
+    resourceType: generationHistory.resourceType,
+    title: generationHistory.title,
+    prompt: generationHistory.prompt,
+    content: generationHistory.content,
+    createdAt: generationHistory.createdAt,
+    shareToken: generationHistory.shareToken,
+  })
+    .from(generationHistory)
+    .where(eq(generationHistory.isShared, 1))
+    .orderBy(desc(generationHistory.createdAt));
+}
+
+// Get a shared resource by token
+export async function getSharedResourceByToken(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select()
+    .from(generationHistory)
+    .where(and(
+      eq(generationHistory.shareToken, token),
+      eq(generationHistory.isShared, 1),
+    ))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
 }

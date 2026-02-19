@@ -4,22 +4,64 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
 import { Streamdown } from "streamdown";
 
-const resourceTypes = [
-  { value: "courseware", label: "课件（PPT）" },
-  { value: "exam", label: "试卷" },
-  { value: "lesson_plan", label: "教学设计" },
-  { value: "lesson_plan_unit", label: "大单元教学设计" },
-  { value: "transcript", label: "逐字稿" },
-  { value: "lecture_script", label: "说课稿" },
-  { value: "homework", label: "作业设计" },
-  { value: "question_design", label: "试题设计" },
+const resourceTypeGroups = [
+  {
+    label: "教学基础",
+    items: [
+      { value: "courseware", label: "课件（PPT）" },
+      { value: "exam", label: "试卷" },
+      { value: "lesson_plan", label: "教学设计" },
+      { value: "lesson_plan_unit", label: "大单元教学设计" },
+      { value: "transcript", label: "逐字稿" },
+      { value: "lecture_script", label: "说课稿" },
+      { value: "homework", label: "作业设计" },
+      { value: "question_design", label: "试题设计" },
+    ],
+  },
+  {
+    label: "教学评估",
+    items: [
+      { value: "grading_rubric", label: "批改辅助/评分标准" },
+      { value: "learning_report", label: "学情分析报告" },
+    ],
+  },
+  {
+    label: "课堂互动",
+    items: [
+      { value: "interactive_game", label: "互动游戏设计" },
+      { value: "discussion_chain", label: "讨论话题/问题链" },
+      { value: "mind_map", label: "思维导图" },
+    ],
+  },
+  {
+    label: "家校沟通",
+    items: [
+      { value: "parent_letter", label: "家长通知/家长信" },
+      { value: "parent_meeting_speech", label: "家长会发言稿" },
+    ],
+  },
+  {
+    label: "跨学科/特殊场景",
+    items: [
+      { value: "pbl_project", label: "项目式学习(PBL)方案" },
+      { value: "school_curriculum", label: "校本课程开发" },
+      { value: "competition_questions", label: "竞赛培训题库" },
+    ],
+  },
+  {
+    label: "教学深度",
+    items: [
+      { value: "pacing_guide", label: "学期教学进度表" },
+      { value: "differentiated_reading", label: "分层阅读材料改写" },
+    ],
+  },
 ];
 
 export default function Generate() {
@@ -27,6 +69,7 @@ export default function Generate() {
   const [title, setTitle] = useState("");
   const [prompt, setPrompt] = useState("");
   const [generatedContent, setGeneratedContent] = useState("");
+  const [alignCurriculumStandards, setAlignCurriculumStandards] = useState(false);
 
   const { data: knowledgeFiles } = trpc.knowledge.list.useQuery();
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
@@ -55,6 +98,7 @@ export default function Generate() {
       resourceType: resourceType as any,
       title,
       prompt,
+      parameters: alignCurriculumStandards ? { alignCurriculumStandards: true } : undefined,
       knowledgeFileIds: selectedFiles,
     });
   };
@@ -87,10 +131,15 @@ export default function Generate() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {resourceTypes.map((type) => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
+                    {resourceTypeGroups.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel className="text-xs text-muted-foreground font-semibold">{group.label}</SelectLabel>
+                        {group.items.map((type) => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
                     ))}
                   </SelectContent>
                 </Select>
@@ -116,6 +165,22 @@ export default function Generate() {
                   rows={8}
                   className="resize-none"
                 />
+              </div>
+
+              {/* Curriculum Standards Alignment Toggle */}
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={alignCurriculumStandards}
+                    onChange={(e) => setAlignCurriculumStandards(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm font-medium">对齐课标/核心素养</span>
+                </label>
+                <span className="text-xs text-muted-foreground">
+                  自动标注教学环节培养的核心素养
+                </span>
               </div>
 
               {knowledgeFiles && knowledgeFiles.length > 0 && (
