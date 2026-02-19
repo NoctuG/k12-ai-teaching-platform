@@ -4,7 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download } from "lucide-react";
+import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine } from "lucide-react";
+import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
 import { Streamdown } from "streamdown";
@@ -49,6 +50,7 @@ const statusColors = {
 
 export default function History() {
   const { data: history, isLoading, refetch } = trpc.generation.list.useQuery();
+  const [, setLocation] = useLocation();
   const [selectedItem, setSelectedItem] = useState<number | null>(null);
   const { data: selectedHistory } = trpc.generation.getById.useQuery(
     { id: selectedItem! },
@@ -141,14 +143,24 @@ export default function History() {
                     </div>
                     <div className="flex gap-2 shrink-0">
                       {item.status === "completed" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedItem(item.id)}
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          查看
-                        </Button>
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedItem(item.id)}
+                          >
+                            <Eye className="w-4 h-4 mr-1" />
+                            查看
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setLocation(`/editor/${item.id}`)}
+                          >
+                            <PenLine className="w-4 h-4 mr-1" />
+                            Canvas编辑
+                          </Button>
+                        </>
                       )}
                       <Button
                         variant="outline"
@@ -186,6 +198,17 @@ export default function History() {
               </div>
               {selectedHistory && (
                 <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedItem(null);
+                      setLocation(`/editor/${selectedHistory.id}`);
+                    }}
+                  >
+                    <PenLine className="w-4 h-4 mr-1" />
+                    Canvas编辑
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
