@@ -13,6 +13,7 @@ import MyTemplates from "./pages/MyTemplates";
 import Profile from "./pages/Profile";
 import Comments from "./pages/Comments";
 import Editor from "./pages/Editor";
+import SharedResources from "./pages/SharedResources";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
       <Route path={"/templates"} component={Templates} />
       <Route path={"/my-templates"} component={MyTemplates} />
       <Route path={"/comments"} component={Comments} />
+      <Route path={"/shared"} component={SharedResources} />
       <Route path={"/profile"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

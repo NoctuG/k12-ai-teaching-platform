@@ -6,10 +6,21 @@ import { z } from "zod";
 import * as db from "./db";
 import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
+import { generateImage } from "./_core/imageGeneration";
+import { transcribeAudio } from "./_core/voiceTranscription";
+
+const allResourceTypes = [
+  "courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design",
+  "grading_rubric", "learning_report", "interactive_game", "discussion_chain", "mind_map",
+  "parent_letter", "parent_meeting_speech", "pbl_project", "school_curriculum", "competition_questions",
+  "pacing_guide", "differentiated_reading",
+] as const;
+
+const resourceTypeZod = z.enum(allResourceTypes);
 
 export const appRouter = router({
   system: systemRouter,
-  
+
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -78,7 +89,7 @@ export const appRouter = router({
   generation: router({
     generate: protectedProcedure
       .input(z.object({
-        resourceType: z.enum(["courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design"]),
+        resourceType: resourceTypeZod,
         title: z.string(),
         prompt: z.string(),
         parameters: z.record(z.string(), z.any()).optional(),
@@ -112,8 +123,13 @@ export const appRouter = router({
               .join("\n");
           }
 
+          // Build the system prompt, with optional curriculum alignment
+          let systemPrompt = getSystemPromptForResourceType(input.resourceType);
+          if (input.parameters?.alignCurriculumStandards) {
+            systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
+          }
+
           // Generate content using LLM
-          const systemPrompt = getSystemPromptForResourceType(input.resourceType);
           const response = await invokeLLM({
             messages: [
               { role: "system", content: systemPrompt },
@@ -144,6 +160,16 @@ export const appRouter = router({
       return await db.getGenerationHistoryByUserId(ctx.user.id);
     }),
 
+    search: protectedProcedure
+      .input(z.object({
+        search: z.string().optional(),
+        resourceType: z.string().optional(),
+        favoritesOnly: z.boolean().optional(),
+      }))
+      .query(async ({ ctx, input }) => {
+        return await db.searchGenerationHistory(ctx.user.id, input);
+      }),
+
     getById: protectedProcedure
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
@@ -169,6 +195,32 @@ export const appRouter = router({
       .mutation(async ({ ctx, input }) => {
         await db.deleteGenerationHistory(input.id, ctx.user.id);
         return { success: true };
+      }),
+
+    toggleFavorite: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const newValue = await db.toggleFavorite(input.id, ctx.user.id);
+        return { success: true, isFavorite: newValue === 1 };
+      }),
+
+    toggleShare: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const { nanoid } = require("nanoid");
+        const token = nanoid(16);
+        const isShared = await db.toggleShare(input.id, ctx.user.id, token);
+        return { success: true, isShared };
+      }),
+
+    shared: publicProcedure.query(async () => {
+      return await db.getSharedResources();
+    }),
+
+    getSharedByToken: publicProcedure
+      .input(z.object({ token: z.string() }))
+      .query(async ({ input }) => {
+        return await db.getSharedResourceByToken(input.token);
       }),
 
     export: protectedProcedure
@@ -202,7 +254,7 @@ export const appRouter = router({
             // For PDF, first generate Word then convert
             const wordPath = path.join(tempDir, `${fileId}.docx`);
             const exportScript = path.join(process.cwd(), "server", "export.py");
-            
+
             execSync(
               `python3 "${exportScript}" word "${history.title}" "${history.content.replace(/"/g, '\\"')}" "${wordPath}"`,
               { encoding: "utf-8" }
@@ -345,7 +397,7 @@ export const appRouter = router({
 
     upload: protectedProcedure
       .input(z.object({
-        resourceType: z.enum(["courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design"]),
+        resourceType: resourceTypeZod,
         title: z.string(),
         description: z.string().optional(),
         content: z.string(),
@@ -389,6 +441,43 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+
+  // 多模态功能：AI图片生成
+  imageGen: router({
+    generate: protectedProcedure
+      .input(z.object({
+        prompt: z.string(),
+        originalImageUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await generateImage({
+          prompt: input.prompt,
+          originalImages: input.originalImageUrl
+            ? [{ url: input.originalImageUrl }]
+            : undefined,
+        });
+        return { success: true, url: result.url };
+      }),
+  }),
+
+  // 多模态功能：语音转文字
+  voice: router({
+    transcribe: protectedProcedure
+      .input(z.object({
+        audioUrl: z.string(),
+        language: z.string().optional(),
+        prompt: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const result = await transcribeAudio(input);
+
+        if ('error' in result) {
+          throw new Error(result.error);
+        }
+
+        return result;
+      }),
+  }),
 });
 
 function getCommentSystemPrompt(commentType: string): string {
@@ -401,7 +490,7 @@ function getCommentSystemPrompt(commentType: string): string {
 3. 长度100-150字
 4. 包含优点、进步和期望
 5. 符合教育规范，体现全面发展`,
-    
+
     homework: `你是一位经验丰富的K12教师，擅长撰写作业评价。请根据学生的作业表现生成个性化的作业评语。
 
 要求：
@@ -410,7 +499,7 @@ function getCommentSystemPrompt(commentType: string): string {
 3. 长度50-80字
 4. 给出建议和鼓励
 5. 体现教师关怀`,
-    
+
     daily: `你是一位经验丰富的K12教师，擅长撰写日常表现评价。请根据学生的日常表现生成简短的评价。
 
 要求：
@@ -418,7 +507,7 @@ function getCommentSystemPrompt(commentType: string): string {
 2. 长度30-50字
 3. 积极正面，鼓励为主
 4. 具体指出表现`,
-    
+
     custom: `你是一位经验丰富的K12教师，擅长撰写学生评语。请根据学生的表现描述生成个性化的评语。
 
 要求：
@@ -427,12 +516,12 @@ function getCommentSystemPrompt(commentType: string): string {
 3. 长度80-120字
 4. 体现教育关怀`,
   };
-  
+
   return prompts[commentType as keyof typeof prompts] || prompts.custom;
 }
 
 function getSystemPromptForResourceType(resourceType: string): string {
-  const prompts = {
+  const prompts: Record<string, string> = {
     courseware: `你是一位经验丰富的K12教师，擅长制作高质量的教学课件。请根据用户的要求生成完整的课件内容，包括：
 1. 课程标题和目标
 2. 教学重点和难点
@@ -543,9 +632,246 @@ function getSystemPromptForResourceType(resourceType: string): string {
 - 选项设计科学
 - 答案详细规范
 - 符合课程标准`,
+
+    // ===== 教学评估类 =====
+    grading_rubric: `你是一位资深的K12教育评价专家，擅长制定科学的评分标准和批改辅助方案。请根据用户的要求生成完整的评分标准/批改辅助方案，包括：
+1. 评价维度（知识掌握、能力表现、情感态度等）
+2. 每个维度的具体评分等级（优秀/良好/合格/待提高）
+3. 每个等级的详细描述和判定标准
+4. 常见典型错误分析及扣分建议
+5. 批改符号说明和使用规范
+6. 综合评价模板和反馈建议
+
+要求：
+- 评价标准客观、可操作
+- 体现形成性评价理念
+- 兼顾知识与能力的多元评价
+- 提供具体的批注示例和反馈话术`,
+
+    learning_report: `你是一位专业的K12教育数据分析师，擅长根据学生学习数据生成学情分析报告。请根据用户提供的信息生成完整的学情分析报告，包括：
+1. 班级/学生基本情况概述
+2. 各知识模块掌握情况分析（用表格或列表呈现）
+3. 学习薄弱点识别与诊断
+4. 学生分层画像（学优生/中等生/待提高生特征）
+5. 教学建议（针对性补救策略）
+6. 下阶段教学重点建议
+7. 家校沟通建议
+
+要求：
+- 数据分析逻辑清晰
+- 诊断结论有据可依
+- 建议具体可落地
+- 语言专业但易于理解`,
+
+    // ===== 课堂互动类 =====
+    interactive_game: `你是一位富有创意的K12教育游戏设计师，擅长设计寓教于乐的课堂互动游戏。请根据用户的要求生成完整的互动游戏设计方案，包括：
+1. 游戏名称和主题
+2. 游戏目标（知识目标和能力目标）
+3. 适用年级和学科
+4. 游戏规则详细说明
+5. 所需材料和准备工作
+6. 游戏流程（热身→主体→总结）
+7. 计分/奖励机制
+8. 变体玩法（适应不同课堂场景）
+9. 注意事项和安全提醒
+
+要求：
+- 游戏设计有趣、易于操作
+- 寓教于乐，知识点覆盖明确
+- 全员参与，避免旁观者效应
+- 时间控制在5-15分钟
+- 可适应线上/线下不同场景`,
+
+    discussion_chain: `你是一位擅长苏格拉底式教学的K12教育专家，精于设计层层递进的讨论话题和问题链。请根据用户的要求生成完整的讨论话题/问题链设计，包括：
+1. 主题概述和讨论目标
+2. 热身问题（唤起已有经验，1-2个）
+3. 核心问题链（由浅入深，4-6个递进问题）
+4. 每个问题的设计意图和预期学生回答
+5. 追问策略（当学生回答偏浅时的引导问题）
+6. 辩论/分组讨论环节设计
+7. 总结提升问题（回归高阶思维）
+8. 讨论评价标准
+
+要求：
+- 问题链逻辑递进，从记忆→理解→应用→分析→评价→创造
+- 开放性与封闭性问题结合
+- 预设学生可能的回答和误区
+- 体现批判性思维和合作学习
+- 引导学生深度思考`,
+
+    mind_map: `你是一位善于结构化思维的K12教育专家，擅长将知识体系转化为清晰的思维导图。请根据用户的要求生成完整的思维导图内容，包括：
+1. 中心主题
+2. 一级分支（核心概念/大模块，3-6个）
+3. 二级分支（每个一级分支下的子概念，2-4个）
+4. 三级分支（关键细节、案例、公式等）
+5. 各节点之间的关联说明
+6. 重点标注和颜色建议
+7. 记忆口诀或助记方法
+
+请用层级缩进的Markdown格式输出，方便转化为思维导图工具可读取的格式。
+
+要求：
+- 结构清晰，层次分明
+- 关键词精炼（每个节点不超过8个字）
+- 覆盖核心知识点
+- 体现知识间的逻辑关系
+- 适合学生复习和记忆使用`,
+
+    // ===== 家校沟通类 =====
+    parent_letter: `你是一位善于家校沟通的K12班主任，擅长撰写温暖专业的家长通知和家长信。请根据用户的要求生成完整的家长通知/家长信，包括：
+1. 称呼和问候语
+2. 通知/告知的具体事项
+3. 需要家长配合的事项（如有）
+4. 时间、地点等关键信息（如涉及）
+5. 温馨提示和注意事项
+6. 联系方式和反馈渠道
+7. 落款（教师/学校）
+
+要求：
+- 语气温和、尊重、专业
+- 信息表达清晰明确
+- 体现家校合作理念
+- 避免命令式口吻
+- 格式规范整洁`,
+
+    parent_meeting_speech: `你是一位擅长家校沟通的K12班主任，精于撰写家长会发言稿。请根据用户的要求生成完整的家长会发言稿，包括：
+1. 开场白（感谢家长到来）
+2. 班级整体情况汇报
+3. 本学期教育教学重点
+4. 学生近期表现分析（整体+分类）
+5. 家庭教育建议
+6. 安全/心理健康提醒
+7. 下阶段工作安排
+8. 互动答疑环节引导语
+9. 总结致谢
+
+要求：
+- 时长控制在20-30分钟发言量
+- 语言亲切、有温度
+- 数据说话，客观呈现
+- 关注家长感受，避免过度批评
+- 提供可操作的家教建议`,
+
+    // ===== 跨学科/特殊场景 =====
+    pbl_project: `你是一位精通项目式学习(PBL)的K12教育专家。请根据用户的要求生成完整的PBL项目方案，包括：
+1. 项目名称和驱动性问题
+2. 项目概述（背景、意义、预期成果）
+3. 学科融合点和核心素养目标
+4. 项目阶段规划
+   - 启动阶段（情境创设、问题提出）
+   - 探究阶段（任务分解、资料收集、实践探索）
+   - 制作阶段（成果创作、迭代优化）
+   - 展示阶段（成果展示、反思评价）
+5. 每阶段的具体任务单和支架工具
+6. 评价量规（过程性评价+终结性评价）
+7. 所需资源和材料清单
+8. 教师指导要点和注意事项
+
+要求：
+- 驱动性问题真实、有挑战性
+- 跨学科融合自然
+- 学生主体，教师引导
+- 成果可展示、可评价
+- 体现21世纪核心技能培养`,
+
+    school_curriculum: `你是一位精通校本课程开发的K12教育专家。请根据用户的要求生成完整的校本课程开发方案，包括：
+1. 课程名称和定位
+2. 课程背景和开发依据
+3. 课程目标（总目标和分级目标）
+4. 课程内容框架（模块划分和主题设计）
+5. 课程实施建议
+   - 教学方法和策略
+   - 课时安排
+   - 教学资源
+6. 课程评价方案
+   - 学生学习评价
+   - 课程实施评价
+7. 课程保障条件
+8. 各模块的详细教学设计纲要
+
+要求：
+- 立足学校特色和地方文化
+- 符合课程开发规范
+- 内容系统完整
+- 可操作性强
+- 体现素质教育理念`,
+
+    competition_questions: `你是一位资深的K12学科竞赛培训专家，擅长设计高水平的竞赛训练题目。请根据用户的要求生成完整的竞赛培训题库，包括：
+1. 知识专题分类
+2. 每个专题下的阶梯式训练题（入门→进阶→挑战）
+3. 每道题的详细解题过程
+4. 一题多解展示（经典题目）
+5. 易错点和陷阱分析
+6. 竞赛真题改编
+7. 思维方法总结
+
+要求：
+- 难度高于课标，但循序渐进
+- 注重思维训练和方法归纳
+- 解题过程详尽规范
+- 覆盖常考知识专题
+- 适合学生自主训练使用`,
+
+    // ===== 教学深度 =====
+    pacing_guide: `你是一位经验丰富的K12教学管理专家，擅长制定科学合理的学期教学进度计划。请根据用户提供的学科、年级和学期信息，生成完整的学期教学进度表(Pacing Guide)，包括：
+1. 学期总体教学规划
+   - 总课时数和教学周数
+   - 核心教学目标
+2. 月度教学安排（按月份或教学周拆分）
+   - 每周教学内容和课题
+   - 对应课标要求
+   - 重点和难点
+3. 考试/测评节点安排
+   - 单元测试时间
+   - 期中/期末考试安排
+4. 弹性调整空间说明
+5. 假期和校历事件标注
+6. 教学资源准备清单
+
+请以表格形式输出教学进度安排，方便教师直接使用。
+
+要求：
+- 进度安排科学合理
+- 充分考虑学生学习节奏
+- 预留复习和机动课时
+- 与课标紧密对齐
+- 标注重要教学节点`,
+
+    differentiated_reading: `你是一位精通分层教学的K12语文/英语教育专家，擅长将阅读材料改写为不同难度等级的版本。请根据用户提供的原文，生成三个难度层次的改写版本：
+
+**Level A（基础版）**
+- 适合基础较薄弱的学生
+- 降低生词量（使用常用词替换难词）
+- 缩短句子长度，减少复合句
+- 增加解释性语句和过渡词
+- 可适当简化段落结构
+
+**Level B（标准版）**
+- 适合中等水平学生
+- 保持核心内容和主要表达
+- 适度调整句式复杂度
+- 保留关键术语但加入简要注释
+
+**Level C（提升版）**
+- 适合学有余力的学生
+- 拓展原文深度（增加背景知识、延伸思考）
+- 使用更丰富的词汇和句式
+- 增加开放性思考问题
+- 提供跨学科关联内容
+
+每个版本需附带：
+1. 预估适合的阅读水平
+2. 生词表和注释
+3. 3-5道配套阅读理解题
+
+要求：
+- 三个版本核心信息一致
+- 难度梯度清晰
+- 改写自然流畅，不生硬
+- 保持原文的教育价值`,
   };
 
-  return prompts[resourceType as keyof typeof prompts] || prompts.courseware;
+  return prompts[resourceType] || prompts.courseware;
 }
 
 export type AppRouter = typeof appRouter;
