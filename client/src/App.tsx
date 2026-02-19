@@ -12,6 +12,7 @@ import Templates from "./pages/Templates";
 import MyTemplates from "./pages/MyTemplates";
 import Profile from "./pages/Profile";
 import Comments from "./pages/Comments";
+import Editor from "./pages/Editor";
 
 function Router() {
   return (
@@ -19,6 +20,7 @@ function Router() {
       <Route path={"/"} component={Home} />
       <Route path={"/generate"} component={Generate} />
       <Route path={"/history"} component={History} />
+      <Route path={"/editor/:id"} component={Editor} />
       <Route path={"/knowledge"} component={Knowledge} />
       <Route path={"/templates"} component={Templates} />
       <Route path={"/my-templates"} component={MyTemplates} />
