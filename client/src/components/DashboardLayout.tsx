@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/sidebar";
 import { getLoginUrl } from "@/const";
 import { useIsMobile } from "@/hooks/useMobile";
-import { LayoutDashboard, LogOut, PanelLeft, Users, Sparkles, History, Library, BookOpen, User as UserIcon, Upload } from "lucide-react";
+import { LayoutDashboard, LogOut, PanelLeft, Users, Sparkles, History, Library, BookOpen, User as UserIcon, Upload, MessageCircle } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { DashboardLayoutSkeleton } from './DashboardLayoutSkeleton';
@@ -30,6 +30,7 @@ import { Button } from "./ui/button";
 const menuItems = [
   { icon: Sparkles, label: "AI生成", path: "/generate" },
   { icon: History, label: "生成历史", path: "/history" },
+  { icon: MessageCircle, label: "学生评语", path: "/comments" },
   { icon: Library, label: "知识库", path: "/knowledge" },
   { icon: BookOpen, label: "模板库", path: "/templates" },
   { icon: Upload, label: "我的模板", path: "/my-templates" },

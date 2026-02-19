@@ -100,3 +100,21 @@ export const resourceTemplates = mysqlTable("resource_templates", {
 
 export type ResourceTemplate = typeof resourceTemplates.$inferSelect;
 export type InsertResourceTemplate = typeof resourceTemplates.$inferInsert;
+
+/**
+ * Student comment batch generation records
+ */
+export const studentComments = mysqlTable("student_comments", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  batchTitle: varchar("batchTitle", { length: 255 }).notNull(), // 批次标题（例如：2024年春季期末评语）
+  commentType: mysqlEnum("commentType", ["final_term", "homework", "daily", "custom"]).notNull(), // 评语类型
+  students: json("students").notNull(), // 学生信息数组 [{name, performance, comment}]
+  totalCount: int("totalCount").notNull(), // 学生总数
+  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StudentComment = typeof studentComments.$inferSelect;
+export type InsertStudentComment = typeof studentComments.$inferInsert;

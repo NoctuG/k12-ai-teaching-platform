@@ -8,7 +8,9 @@ import {
   generationHistory,
   InsertGenerationHistory,
   resourceTemplates,
-  InsertResourceTemplate
+  InsertResourceTemplate,
+  studentComments,
+  InsertStudentComment
 } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
@@ -220,4 +222,42 @@ export async function incrementTemplateUsage(id: number) {
   if (template) {
     await db.update(resourceTemplates).set({ usageCount: template.usageCount + 1 }).where(eq(resourceTemplates.id, id));
   }
+}
+
+// Student Comments functions
+export async function createStudentCommentBatch(data: InsertStudentComment) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(studentComments).values(data);
+  return result;
+}
+
+export async function getStudentCommentsByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return db.select().from(studentComments).where(eq(studentComments.userId, userId)).orderBy(desc(studentComments.createdAt));
+}
+
+export async function getStudentCommentById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(studentComments).where(eq(studentComments.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function updateStudentComment(id: number, data: Partial<InsertStudentComment>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(studentComments).set(data).where(eq(studentComments.id, id));
+}
+
+export async function deleteStudentComment(id: number, userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(studentComments).where(and(eq(studentComments.id, id), eq(studentComments.userId, userId)));
 }

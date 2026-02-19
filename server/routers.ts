@@ -170,6 +170,168 @@ export const appRouter = router({
         await db.deleteGenerationHistory(input.id, ctx.user.id);
         return { success: true };
       }),
+
+    export: protectedProcedure
+      .input(z.object({
+        id: z.number(),
+        format: z.enum(["word", "ppt", "pdf"]),
+      }))
+      .mutation(async ({ input }) => {
+        const history = await db.getGenerationHistoryById(input.id);
+        if (!history) {
+          throw new Error("记录不存在");
+        }
+
+        const { execSync } = require("child_process");
+        const path = require("path");
+        const fs = require("fs");
+        const { nanoid } = require("nanoid");
+
+        // Create temp directory if not exists
+        const tempDir = path.join(process.cwd(), "temp");
+        if (!fs.existsSync(tempDir)) {
+          fs.mkdirSync(tempDir, { recursive: true });
+        }
+
+        const fileId = nanoid();
+        const extension = input.format === "word" ? "docx" : input.format === "ppt" ? "pptx" : "pdf";
+        const outputPath = path.join(tempDir, `${fileId}.${extension}`);
+
+        try {
+          if (input.format === "pdf") {
+            // For PDF, first generate Word then convert
+            const wordPath = path.join(tempDir, `${fileId}.docx`);
+            const exportScript = path.join(process.cwd(), "server", "export.py");
+            
+            execSync(
+              `python3 "${exportScript}" word "${history.title}" "${history.content.replace(/"/g, '\\"')}" "${wordPath}"`,
+              { encoding: "utf-8" }
+            );
+
+            // Convert Word to PDF using LibreOffice
+            execSync(
+              `libreoffice --headless --convert-to pdf --outdir "${tempDir}" "${wordPath}"`,
+              { encoding: "utf-8", timeout: 30000 }
+            );
+
+            // Clean up Word file
+            fs.unlinkSync(wordPath);
+          } else {
+            const exportScript = path.join(process.cwd(), "server", "export.py");
+            const result = execSync(
+              `python3 "${exportScript}" ${input.format} "${history.title}" "${history.content.replace(/"/g, '\\"')}" "${outputPath}"`,
+              { encoding: "utf-8" }
+            );
+
+            const output = JSON.parse(result.trim());
+            if (output.error) {
+              throw new Error(output.error);
+            }
+          }
+
+          // Read file and convert to base64
+          const fileBuffer = fs.readFileSync(outputPath);
+          const base64 = fileBuffer.toString("base64");
+
+          // Clean up temp file
+          fs.unlinkSync(outputPath);
+
+          return {
+            success: true,
+            filename: `${history.title}.${extension}`,
+            content: base64,
+          };
+        } catch (error) {
+          // Clean up on error
+          if (fs.existsSync(outputPath)) {
+            fs.unlinkSync(outputPath);
+          }
+          throw error;
+        }
+      }),
+  }),
+
+  comments: router({
+    // 创建批量评语任务
+    createBatch: protectedProcedure
+      .input(z.object({
+        batchTitle: z.string(),
+        commentType: z.enum(["final_term", "homework", "daily", "custom"]),
+        students: z.array(z.object({
+          name: z.string(),
+          performance: z.string(), // 学生表现描述
+        })),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        // 创建初始记录
+        const result = await db.createStudentCommentBatch({
+          userId: ctx.user.id,
+          batchTitle: input.batchTitle,
+          commentType: input.commentType,
+          students: input.students.map(s => ({ ...s, comment: "" })),
+          totalCount: input.students.length,
+          status: "generating",
+        });
+
+        const batchId = Number((result as any).insertId);
+
+        // 异步生成评语
+        (async () => {
+          try {
+            const studentsWithComments = await Promise.all(
+              input.students.map(async (student) => {
+                const systemPrompt = getCommentSystemPrompt(input.commentType);
+                const response = await invokeLLM({
+                  messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: `学生姓名：${student.name}\n表现描述：${student.performance}` },
+                  ],
+                });
+
+                const messageContent = response.choices[0]?.message?.content;
+                const comment = typeof messageContent === 'string' ? messageContent : "生成失败";
+
+                return {
+                  name: student.name,
+                  performance: student.performance,
+                  comment,
+                };
+              })
+            );
+
+            await db.updateStudentComment(batchId, {
+              students: studentsWithComments,
+              status: "completed",
+            });
+          } catch (error) {
+            await db.updateStudentComment(batchId, {
+              status: "failed",
+            });
+          }
+        })();
+
+        return { success: true, batchId };
+      }),
+
+    // 获取评语列表
+    list: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getStudentCommentsByUserId(ctx.user.id);
+    }),
+
+    // 获取单个评语批次
+    getById: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        return await db.getStudentCommentById(input.id);
+      }),
+
+    // 删除评语批次
+    delete: protectedProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.deleteStudentComment(input.id, ctx.user.id);
+        return { success: true };
+      }),
   }),
 
   templates: router({
@@ -228,6 +390,46 @@ export const appRouter = router({
       }),
   }),
 });
+
+function getCommentSystemPrompt(commentType: string): string {
+  const prompts = {
+    final_term: `你是一位经验丰富的K12教师，擅长撰写学生期末评语。请根据学生的表现描述生成个性化的期末评语。
+
+要求：
+1. 语言亲切、积极、鼓励性
+2. 内容具体、有针对性
+3. 长度100-150字
+4. 包含优点、进步和期望
+5. 符合教育规范，体现全面发展`,
+    
+    homework: `你是一位经验丰富的K12教师，擅长撰写作业评价。请根据学生的作业表现生成个性化的作业评语。
+
+要求：
+1. 语言简洁、具体
+2. 指出优点和需要改进之处
+3. 长度50-80字
+4. 给出建议和鼓励
+5. 体现教师关怀`,
+    
+    daily: `你是一位经验丰富的K12教师，擅长撰写日常表现评价。请根据学生的日常表现生成简短的评价。
+
+要求：
+1. 语言简洁、直接
+2. 长度30-50字
+3. 积极正面，鼓励为主
+4. 具体指出表现`,
+    
+    custom: `你是一位经验丰富的K12教师，擅长撰写学生评语。请根据学生的表现描述生成个性化的评语。
+
+要求：
+1. 语言亲切、具体
+2. 内容有针对性
+3. 长度80-120字
+4. 体现教育关怀`,
+  };
+  
+  return prompts[commentType as keyof typeof prompts] || prompts.custom;
+}
 
 function getSystemPromptForResourceType(resourceType: string): string {
   const prompts = {

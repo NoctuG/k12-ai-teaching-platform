@@ -11,6 +11,7 @@ import Knowledge from "./pages/Knowledge";
 import Templates from "./pages/Templates";
 import MyTemplates from "./pages/MyTemplates";
 import Profile from "./pages/Profile";
+import Comments from "./pages/Comments";
 
 function Router() {
   return (
@@ -21,6 +22,7 @@ function Router() {
       <Route path={"/knowledge"} component={Knowledge} />
       <Route path={"/templates"} component={Templates} />
       <Route path={"/my-templates"} component={MyTemplates} />
+      <Route path={"/comments"} component={Comments} />
       <Route path={"/profile"} component={Profile} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />

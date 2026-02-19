@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2 } from "lucide-react";
+import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
 import { Streamdown } from "streamdown";
@@ -54,6 +54,29 @@ export default function History() {
     { id: selectedItem! },
     { enabled: !!selectedItem }
   );
+
+  const exportMutation = trpc.generation.export.useMutation({
+    onSuccess: (data) => {
+      // Download file
+      const byteCharacters = atob(data.content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("导出成功");
+    },
+    onError: (error) => {
+      toast.error("导出失败：" + error.message);
+    },
+  });
 
   const deleteMutation = trpc.generation.delete.useMutation({
     onSuccess: () => {
@@ -154,10 +177,36 @@ export default function History() {
       <Dialog open={!!selectedItem} onOpenChange={(open) => !open && setSelectedItem(null)}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{selectedHistory?.title}</DialogTitle>
-            <DialogDescription>
-              {selectedHistory && format(new Date(selectedHistory.createdAt), "PPP", { locale: zhCN })}
-            </DialogDescription>
+            <div className="flex items-start justify-between">
+              <div>
+                <DialogTitle>{selectedHistory?.title}</DialogTitle>
+                <DialogDescription>
+                  {selectedHistory && format(new Date(selectedHistory.createdAt), "PPP", { locale: zhCN })}
+                </DialogDescription>
+              </div>
+              {selectedHistory && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "word" })}
+                    disabled={exportMutation.isPending}
+                  >
+                    <Download className="w-4 h-4 mr-1" />
+                    Word
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "ppt" })}
+                    disabled={exportMutation.isPending}
+                  >
+                    <Download className="w-4 h-4 mr-1" />
+                    PPT
+                  </Button>
+                </div>
+              )}
+            </div>
           </DialogHeader>
           {selectedHistory && (
             <div className="prose prose-sm max-w-none">

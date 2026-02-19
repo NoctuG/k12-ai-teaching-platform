@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getLoginUrl } from "@/const";
 import { Link } from "wouter";
-import { Sparkles, FileText, ClipboardList, BookText, Mic, MessageSquare, ArrowRight } from "lucide-react";
+import { Sparkles, FileText, ClipboardList, BookText, Mic, MessageSquare, ArrowRight, MessageCircle } from "lucide-react";
 import { useEffect } from "react";
 
 export default function Home() {
@@ -98,6 +98,11 @@ export default function Home() {
               icon={<FileText className="w-8 h-8" />}
               title="试题设计"
               description="专业的试题设计工具，生成高质量试题及详细解析"
+            />
+            <FeatureCard
+              icon={<MessageCircle className="w-8 h-8" />}
+              title="学生评语"
+              description="批量生成个性化学生评语，支持期末评语、作业评价等多种类型"
             />
             <FeatureCard
               icon={<Sparkles className="w-8 h-8" />}
