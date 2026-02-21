@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Upload, Trash2, File, Loader2 } from "lucide-react";
+import { Upload, Trash2, File, Loader2, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { useState } from "react";
 import { format } from "date-fns";
 import { zhCN } from "date-fns/locale";
@@ -16,9 +16,18 @@ export default function Knowledge() {
 
   const uploadMutation = trpc.knowledge.upload.useMutation({
     onSuccess: () => {
-      toast.success("上传成功");
+      toast.success("上传成功，正在解析文件内容...");
       refetch();
       setUploading(false);
+      // Poll for processing completion
+      const interval = setInterval(async () => {
+        const result = await refetch();
+        const allDone = result.data?.every(
+          (f) => f.processingStatus !== "processing" && f.processingStatus !== "pending"
+        );
+        if (allDone) clearInterval(interval);
+      }, 3000);
+      setTimeout(() => clearInterval(interval), 60000);
     },
     onError: (error) => {
       toast.error("上传失败：" + error.message);
@@ -92,7 +101,7 @@ export default function Knowledge() {
               上传文件
             </CardTitle>
             <CardDescription>
-              支持PDF、Word、图片等格式，单个文件最大10MB
+              支持PDF、Word、TXT等格式，上传后自动解析文本内容用于RAG检索，单个文件最大10MB
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -146,6 +155,28 @@ export default function Knowledge() {
                             <span>{formatFileSize(file.fileSize)}</span>
                             <span>·</span>
                             <span>{format(new Date(file.createdAt), "PPP", { locale: zhCN })}</span>
+                            <span>·</span>
+                            {file.processingStatus === "completed" && file.chunkCount > 0 ? (
+                              <span className="flex items-center gap-1 text-green-600">
+                                <CheckCircle2 className="w-3 h-3" />
+                                已解析 ({file.chunkCount} 个片段)
+                              </span>
+                            ) : file.processingStatus === "processing" || file.processingStatus === "pending" ? (
+                              <span className="flex items-center gap-1 text-amber-600">
+                                <Clock className="w-3 h-3 animate-spin" />
+                                解析中...
+                              </span>
+                            ) : file.processingStatus === "failed" ? (
+                              <span className="flex items-center gap-1 text-red-500" title={file.processingError || ""}>
+                                <AlertCircle className="w-3 h-3" />
+                                解析失败
+                              </span>
+                            ) : file.processingStatus === "completed" ? (
+                              <span className="flex items-center gap-1 text-muted-foreground">
+                                <CheckCircle2 className="w-3 h-3" />
+                                无文本内容
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </div>

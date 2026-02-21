@@ -8,6 +8,9 @@ import { storagePut } from "./storage";
 import { invokeLLM } from "./_core/llm";
 import { generateImage } from "./_core/imageGeneration";
 import { transcribeAudio } from "./_core/voiceTranscription";
+import { extractTextFromBuffer } from "./_core/textExtraction";
+import { splitTextIntoChunks } from "./_core/chunking";
+import { retrieveRelevantChunks, formatRetrievalContext } from "./_core/ragRetrieval";
 
 const allResourceTypes = [
   "courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design",
@@ -66,14 +69,59 @@ export const appRouter = router({
         const fileKey = `knowledge/${ctx.user.id}/${Date.now()}-${input.fileName}`;
         const { url } = await storagePut(fileKey, buffer, input.mimeType);
 
-        await db.createKnowledgeFile({
+        const result = await db.createKnowledgeFile({
           userId: ctx.user.id,
           fileName: input.fileName,
           fileKey,
           fileUrl: url,
           fileSize: buffer.length,
           mimeType: input.mimeType,
+          processingStatus: "processing",
         });
+
+        const fileId = Number((result as any).insertId);
+
+        // Async text extraction and chunking (non-blocking)
+        (async () => {
+          try {
+            const textContent = await extractTextFromBuffer(buffer, input.mimeType, input.fileName);
+
+            if (!textContent || textContent.trim().length === 0) {
+              await db.updateKnowledgeFile(fileId, {
+                processingStatus: "completed",
+                chunkCount: 0,
+                textContent: "",
+              });
+              return;
+            }
+
+            const chunks = splitTextIntoChunks(textContent);
+
+            if (chunks.length > 0) {
+              await db.createKnowledgeChunks(
+                chunks.map(chunk => ({
+                  knowledgeFileId: fileId,
+                  userId: ctx.user.id,
+                  chunkIndex: chunk.index,
+                  content: chunk.content,
+                  charCount: chunk.charCount,
+                }))
+              );
+            }
+
+            await db.updateKnowledgeFile(fileId, {
+              textContent,
+              chunkCount: chunks.length,
+              processingStatus: "completed",
+            });
+          } catch (error) {
+            console.error("[RAG] Text extraction failed for file:", input.fileName, error);
+            await db.updateKnowledgeFile(fileId, {
+              processingStatus: "failed",
+              processingError: error instanceof Error ? error.message : "文本提取失败",
+            });
+          }
+        })();
 
         return { success: true, url };
       }),
@@ -111,16 +159,39 @@ export const appRouter = router({
         const historyId = Number((result as any).insertId);
 
         try {
-          // Build context from knowledge files
+          // Build context from knowledge files using RAG retrieval
           let knowledgeContext = "";
+          let retrievalSnapshot = "";
           if (input.knowledgeFileIds && input.knowledgeFileIds.length > 0) {
-            const files = await Promise.all(
-              input.knowledgeFileIds.map(id => db.getKnowledgeFileById(id))
+            const files = await db.getKnowledgeFilesByIds(input.knowledgeFileIds);
+            const fileNameMap: Record<number, string> = {};
+            for (const f of files) {
+              fileNameMap[f.id] = f.fileName;
+            }
+
+            const retrievedChunks = await retrieveRelevantChunks(
+              input.knowledgeFileIds,
+              input.prompt,
+              fileNameMap
             );
-            knowledgeContext = files
-              .filter(f => f)
-              .map(f => `参考资料: ${f!.fileName}`)
-              .join("\n");
+
+            if (retrievedChunks.length > 0) {
+              knowledgeContext = formatRetrievalContext(retrievedChunks);
+              // Save retrieval snapshot for traceability
+              retrievalSnapshot = JSON.stringify(
+                retrievedChunks.map(c => ({
+                  file: c.fileName,
+                  chunk: c.chunkIndex,
+                  score: Math.round(c.score * 1000) / 1000,
+                  preview: c.content.slice(0, 100),
+                }))
+              );
+            } else {
+              // Fallback: if no chunks exist yet (files still processing), use filenames
+              knowledgeContext = files
+                .map(f => `参考资料: ${f.fileName}`)
+                .join("\n");
+            }
           }
 
           // Build the system prompt, with optional curriculum alignment
@@ -129,21 +200,26 @@ export const appRouter = router({
             systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
           }
 
-          // Generate content using LLM
+          // Generate content using LLM with RAG context
+          const userMessage = knowledgeContext
+            ? `${knowledgeContext}\n\n---\n\n${input.prompt}`
+            : input.prompt;
+
           const response = await invokeLLM({
             messages: [
               { role: "system", content: systemPrompt },
-              { role: "user", content: `${knowledgeContext}\n\n${input.prompt}` },
+              { role: "user", content: userMessage },
             ],
           });
 
           const messageContent = response.choices[0]?.message?.content;
           const content = typeof messageContent === 'string' ? messageContent : "";
 
-          // Update with generated content
+          // Update with generated content and retrieval snapshot
           await db.updateGenerationHistory(historyId, {
             content,
             status: "completed",
+            ...(retrievalSnapshot ? { retrievalContext: retrievalSnapshot } : {}),
           });
 
           return { success: true, historyId, content };

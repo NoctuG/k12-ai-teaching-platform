@@ -37,12 +37,32 @@ export const knowledgeFiles = mysqlTable("knowledge_files", {
   fileSize: int("fileSize").notNull(), // File size in bytes
   mimeType: varchar("mimeType", { length: 100 }).notNull(),
   description: text("description"), // Optional description
+  textContent: text("textContent"), // Full extracted text content
+  chunkCount: int("chunkCount").default(0).notNull(), // Number of chunks created
+  processingStatus: mysqlEnum("processingStatus", ["pending", "processing", "completed", "failed"]).default("pending").notNull(),
+  processingError: text("processingError"), // Error message if processing failed
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
 export type KnowledgeFile = typeof knowledgeFiles.$inferSelect;
 export type InsertKnowledgeFile = typeof knowledgeFiles.$inferInsert;
+
+/**
+ * Knowledge file chunks for RAG retrieval
+ */
+export const knowledgeChunks = mysqlTable("knowledge_chunks", {
+  id: int("id").autoincrement().primaryKey(),
+  knowledgeFileId: int("knowledgeFileId").notNull(), // Foreign key to knowledge_files
+  userId: int("userId").notNull(), // Denormalized for query efficiency
+  chunkIndex: int("chunkIndex").notNull(), // Order within the file
+  content: text("content").notNull(), // Chunk text content
+  charCount: int("charCount").notNull(), // Character count for the chunk
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type KnowledgeChunk = typeof knowledgeChunks.$inferSelect;
+export type InsertKnowledgeChunk = typeof knowledgeChunks.$inferInsert;
 
 /**
  * Resource types that can be generated
@@ -87,6 +107,7 @@ export const generationHistory = mysqlTable("generation_history", {
   parameters: json("parameters"), // Generation parameters (difficulty, grade, etc.)
   content: text("content").notNull(), // Generated content
   knowledgeFileIds: json("knowledgeFileIds"), // Array of knowledge file IDs used
+  retrievalContext: text("retrievalContext"), // Snapshot of RAG-retrieved chunks used in generation
   status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
   errorMessage: text("errorMessage"), // Error message if failed
   isFavorite: int("isFavorite").default(0).notNull(), // 1 = favorite, 0 = not
