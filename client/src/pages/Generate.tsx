@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { trpc } from "@/lib/trpc";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, CheckCircle2, Clock } from "lucide-react";
 import { Streamdown } from "streamdown";
 
 const resourceTypeGroups = [
@@ -186,6 +186,7 @@ export default function Generate() {
               {knowledgeFiles && knowledgeFiles.length > 0 && (
                 <div className="space-y-2">
                   <Label>参考资料（可选）</Label>
+                  <p className="text-xs text-muted-foreground">选中的文件内容将通过RAG检索参与生成</p>
                   <div className="border rounded-lg p-4 space-y-2 max-h-48 overflow-y-auto">
                     {knowledgeFiles.map((file) => (
                       <label
@@ -204,7 +205,12 @@ export default function Generate() {
                           }}
                           className="rounded"
                         />
-                        <span className="text-sm truncate">{file.fileName}</span>
+                        <span className="text-sm truncate flex-1">{file.fileName}</span>
+                        {file.processingStatus === "completed" && file.chunkCount > 0 ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-green-600 shrink-0" />
+                        ) : file.processingStatus === "processing" || file.processingStatus === "pending" ? (
+                          <Clock className="w-3.5 h-3.5 text-amber-600 shrink-0 animate-spin" />
+                        ) : null}
                       </label>
                     ))}
                   </div>

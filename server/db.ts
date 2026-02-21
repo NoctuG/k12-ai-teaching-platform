@@ -1,10 +1,12 @@
-import { eq, desc, and, like, or, sql } from "drizzle-orm";
+import { eq, desc, and, like, or, sql, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { 
-  InsertUser, 
-  users, 
-  knowledgeFiles, 
+import {
+  InsertUser,
+  users,
+  knowledgeFiles,
   InsertKnowledgeFile,
+  knowledgeChunks,
+  InsertKnowledgeChunk,
   generationHistory,
   InsertGenerationHistory,
   resourceTemplates,
@@ -123,6 +125,8 @@ export async function deleteKnowledgeFile(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
+  // Delete associated chunks first
+  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.knowledgeFileId, id));
   await db.delete(knowledgeFiles).where(and(eq(knowledgeFiles.id, id), eq(knowledgeFiles.userId, userId)));
 }
 
@@ -132,6 +136,37 @@ export async function getKnowledgeFileById(id: number) {
 
   const result = await db.select().from(knowledgeFiles).where(eq(knowledgeFiles.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getKnowledgeFilesByIds(ids: number[]) {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(knowledgeFiles).where(inArray(knowledgeFiles.id, ids));
+}
+
+export async function updateKnowledgeFile(id: number, updates: Partial<InsertKnowledgeFile>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(knowledgeFiles).set(updates).where(eq(knowledgeFiles.id, id));
+}
+
+// Knowledge Chunks
+export async function createKnowledgeChunks(chunks: InsertKnowledgeChunk[]) {
+  if (chunks.length === 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.insert(knowledgeChunks).values(chunks);
+}
+
+export async function deleteKnowledgeChunksByFileId(knowledgeFileId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.knowledgeFileId, knowledgeFileId));
 }
 
 // Generation History
