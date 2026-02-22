@@ -30,6 +30,9 @@ import {
   generationHistoryTags,
   generationHistoryVersions,
   InsertGenerationHistoryVersion,
+  collaborationSessions,
+  resourceComments,
+  resourcePresence,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -63,7 +66,16 @@ export async function upsertUser(user: InsertUser): Promise<void> {
     };
     const updateSet: Record<string, unknown> = {};
 
-    const textFields = ["name", "email", "loginMethod", "passwordHash", "school", "subject", "grade", "bio"] as const;
+    const textFields = [
+      "name",
+      "email",
+      "loginMethod",
+      "passwordHash",
+      "school",
+      "subject",
+      "grade",
+      "bio",
+    ] as const;
     type TextField = (typeof textFields)[number];
 
     const assignNullable = (field: TextField) => {
@@ -109,7 +121,11 @@ export async function getUserByOpenId(openId: string) {
     return undefined;
   }
 
-  const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.openId, openId))
+    .limit(1);
 
   return result.length > 0 ? result[0] : undefined;
 }
@@ -131,7 +147,10 @@ export async function createKnowledgeFile(file: InsertKnowledgeFile) {
   return result;
 }
 
-export async function getKnowledgeFilesByUserId(userId: number, options?: { folderId?: number; tagIds?: number[] }) {
+export async function getKnowledgeFilesByUserId(
+  userId: number,
+  options?: { folderId?: number; tagIds?: number[] }
+) {
   const db = await getDb();
   if (!db) return [];
 
@@ -140,13 +159,23 @@ export async function getKnowledgeFilesByUserId(userId: number, options?: { fold
     conditions.push(eq(knowledgeFiles.folderId, options.folderId));
   }
   if (options?.tagIds && options.tagIds.length > 0) {
-    const tagFilter = db.select({ fileId: knowledgeFileTags.knowledgeFileId })
+    const tagFilter = db
+      .select({ fileId: knowledgeFileTags.knowledgeFileId })
       .from(knowledgeFileTags)
-      .where(and(eq(knowledgeFileTags.userId, userId), inArray(knowledgeFileTags.tagId, options.tagIds)));
+      .where(
+        and(
+          eq(knowledgeFileTags.userId, userId),
+          inArray(knowledgeFileTags.tagId, options.tagIds)
+        )
+      );
     conditions.push(inArray(knowledgeFiles.id, tagFilter));
   }
 
-  return await db.select().from(knowledgeFiles).where(and(...conditions)).orderBy(desc(knowledgeFiles.createdAt));
+  return await db
+    .select()
+    .from(knowledgeFiles)
+    .where(and(...conditions))
+    .orderBy(desc(knowledgeFiles.createdAt));
 }
 
 export async function deleteKnowledgeFile(id: number, userId: number) {
@@ -154,15 +183,23 @@ export async function deleteKnowledgeFile(id: number, userId: number) {
   if (!db) throw new Error("Database not available");
 
   // Delete associated chunks first
-  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.knowledgeFileId, id));
-  await db.delete(knowledgeFiles).where(and(eq(knowledgeFiles.id, id), eq(knowledgeFiles.userId, userId)));
+  await db
+    .delete(knowledgeChunks)
+    .where(eq(knowledgeChunks.knowledgeFileId, id));
+  await db
+    .delete(knowledgeFiles)
+    .where(and(eq(knowledgeFiles.id, id), eq(knowledgeFiles.userId, userId)));
 }
 
 export async function getKnowledgeFileById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select().from(knowledgeFiles).where(eq(knowledgeFiles.id, id)).limit(1);
+  const result = await db
+    .select()
+    .from(knowledgeFiles)
+    .where(eq(knowledgeFiles.id, id))
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
@@ -171,10 +208,16 @@ export async function getKnowledgeFilesByIds(ids: number[]) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(knowledgeFiles).where(inArray(knowledgeFiles.id, ids));
+  return await db
+    .select()
+    .from(knowledgeFiles)
+    .where(inArray(knowledgeFiles.id, ids));
 }
 
-export async function updateKnowledgeFile(id: number, updates: Partial<InsertKnowledgeFile>) {
+export async function updateKnowledgeFile(
+  id: number,
+  updates: Partial<InsertKnowledgeFile>
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -194,11 +237,15 @@ export async function deleteKnowledgeChunksByFileId(knowledgeFileId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.delete(knowledgeChunks).where(eq(knowledgeChunks.knowledgeFileId, knowledgeFileId));
+  await db
+    .delete(knowledgeChunks)
+    .where(eq(knowledgeChunks.knowledgeFileId, knowledgeFileId));
 }
 
 // Generation History
-export async function createGenerationHistory(history: InsertGenerationHistory) {
+export async function createGenerationHistory(
+  history: InsertGenerationHistory
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -206,7 +253,9 @@ export async function createGenerationHistory(history: InsertGenerationHistory) 
   return result;
 }
 
-export async function createGenerationHistoryVersion(version: InsertGenerationHistoryVersion) {
+export async function createGenerationHistoryVersion(
+  version: InsertGenerationHistoryVersion
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.insert(generationHistoryVersions).values(version);
@@ -215,7 +264,9 @@ export async function createGenerationHistoryVersion(version: InsertGenerationHi
 export async function getGenerationHistoryVersions(generationId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(generationHistoryVersions)
+  return db
+    .select()
+    .from(generationHistoryVersions)
     .where(eq(generationHistoryVersions.generationId, generationId))
     .orderBy(desc(generationHistoryVersions.versionNo));
 }
@@ -223,7 +274,8 @@ export async function getGenerationHistoryVersions(generationId: number) {
 export async function getLatestGenerationVersionNo(generationId: number) {
   const db = await getDb();
   if (!db) return 0;
-  const versions = await db.select({ versionNo: generationHistoryVersions.versionNo })
+  const versions = await db
+    .select({ versionNo: generationHistoryVersions.versionNo })
     .from(generationHistoryVersions)
     .where(eq(generationHistoryVersions.generationId, generationId))
     .orderBy(desc(generationHistoryVersions.versionNo))
@@ -235,29 +287,47 @@ export async function getGenerationHistoryByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(generationHistory).where(eq(generationHistory.userId, userId)).orderBy(desc(generationHistory.createdAt));
+  return await db
+    .select()
+    .from(generationHistory)
+    .where(eq(generationHistory.userId, userId))
+    .orderBy(desc(generationHistory.createdAt));
 }
 
 export async function getGenerationHistoryById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select().from(generationHistory).where(eq(generationHistory.id, id)).limit(1);
+  const result = await db
+    .select()
+    .from(generationHistory)
+    .where(eq(generationHistory.id, id))
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
-export async function updateGenerationHistory(id: number, updates: Partial<InsertGenerationHistory>) {
+export async function updateGenerationHistory(
+  id: number,
+  updates: Partial<InsertGenerationHistory>
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.update(generationHistory).set(updates).where(eq(generationHistory.id, id));
+  await db
+    .update(generationHistory)
+    .set(updates)
+    .where(eq(generationHistory.id, id));
 }
 
 export async function deleteGenerationHistory(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.delete(generationHistory).where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)));
+  await db
+    .delete(generationHistory)
+    .where(
+      and(eq(generationHistory.id, id), eq(generationHistory.userId, userId))
+    );
 }
 
 export async function createGenerationExportTask(task: InsertGenerationExport) {
@@ -267,19 +337,35 @@ export async function createGenerationExportTask(task: InsertGenerationExport) {
   return await db.insert(generationExports).values(task);
 }
 
-export async function updateGenerationExportTask(id: number, updates: Partial<InsertGenerationExport>) {
+export async function updateGenerationExportTask(
+  id: number,
+  updates: Partial<InsertGenerationExport>
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.update(generationExports).set(updates).where(eq(generationExports.id, id));
+  await db
+    .update(generationExports)
+    .set(updates)
+    .where(eq(generationExports.id, id));
 }
 
-export async function getGenerationExportTasksByHistoryId(generationHistoryId: number, userId: number) {
+export async function getGenerationExportTasksByHistoryId(
+  generationHistoryId: number,
+  userId: number
+) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(generationExports)
-    .where(and(eq(generationExports.generationHistoryId, generationHistoryId), eq(generationExports.userId, userId)))
+  return await db
+    .select()
+    .from(generationExports)
+    .where(
+      and(
+        eq(generationExports.generationHistoryId, generationHistoryId),
+        eq(generationExports.userId, userId)
+      )
+    )
     .orderBy(desc(generationExports.createdAt));
 }
 
@@ -288,14 +374,27 @@ export async function getPublicTemplates() {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(resourceTemplates).where(eq(resourceTemplates.isPublic, 1)).orderBy(desc(resourceTemplates.usageCount));
+  return await db
+    .select()
+    .from(resourceTemplates)
+    .where(eq(resourceTemplates.isPublic, 1))
+    .orderBy(desc(resourceTemplates.usageCount));
 }
 
 export async function getUserTemplates(userId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(resourceTemplates).where(and(eq(resourceTemplates.createdBy, userId), eq(resourceTemplates.isUserUploaded, 1))).orderBy(desc(resourceTemplates.createdAt));
+  return await db
+    .select()
+    .from(resourceTemplates)
+    .where(
+      and(
+        eq(resourceTemplates.createdBy, userId),
+        eq(resourceTemplates.isUserUploaded, 1)
+      )
+    )
+    .orderBy(desc(resourceTemplates.createdAt));
 }
 
 export async function createTemplate(template: InsertResourceTemplate) {
@@ -310,14 +409,22 @@ export async function deleteTemplate(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.delete(resourceTemplates).where(and(eq(resourceTemplates.id, id), eq(resourceTemplates.createdBy, userId)));
+  await db
+    .delete(resourceTemplates)
+    .where(
+      and(eq(resourceTemplates.id, id), eq(resourceTemplates.createdBy, userId))
+    );
 }
 
 export async function getTemplateById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select().from(resourceTemplates).where(eq(resourceTemplates.id, id)).limit(1);
+  const result = await db
+    .select()
+    .from(resourceTemplates)
+    .where(eq(resourceTemplates.id, id))
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
@@ -327,7 +434,10 @@ export async function incrementTemplateUsage(id: number) {
 
   const template = await getTemplateById(id);
   if (template) {
-    await db.update(resourceTemplates).set({ usageCount: template.usageCount + 1 }).where(eq(resourceTemplates.id, id));
+    await db
+      .update(resourceTemplates)
+      .set({ usageCount: template.usageCount + 1 })
+      .where(eq(resourceTemplates.id, id));
   }
 }
 
@@ -344,18 +454,29 @@ export async function getStudentCommentsByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
 
-  return db.select().from(studentComments).where(eq(studentComments.userId, userId)).orderBy(desc(studentComments.createdAt));
+  return db
+    .select()
+    .from(studentComments)
+    .where(eq(studentComments.userId, userId))
+    .orderBy(desc(studentComments.createdAt));
 }
 
 export async function getStudentCommentById(id: number) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select().from(studentComments).where(eq(studentComments.id, id)).limit(1);
+  const result = await db
+    .select()
+    .from(studentComments)
+    .where(eq(studentComments.id, id))
+    .limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
 
-export async function updateStudentComment(id: number, data: Partial<InsertStudentComment>) {
+export async function updateStudentComment(
+  id: number,
+  data: Partial<InsertStudentComment>
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
@@ -366,13 +487,19 @@ export async function deleteStudentComment(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  await db.delete(studentComments).where(and(eq(studentComments.id, id), eq(studentComments.userId, userId)));
+  await db
+    .delete(studentComments)
+    .where(and(eq(studentComments.id, id), eq(studentComments.userId, userId)));
 }
 
 export async function getClassesByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(classes).where(eq(classes.userId, userId)).orderBy(desc(classes.updatedAt));
+  return db
+    .select()
+    .from(classes)
+    .where(eq(classes.userId, userId))
+    .orderBy(desc(classes.updatedAt));
 }
 
 export async function createClass(data: InsertClass) {
@@ -384,7 +511,11 @@ export async function createClass(data: InsertClass) {
 export async function getStudentsByClassId(userId: number, classId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(students).where(and(eq(students.userId, userId), eq(students.classId, classId))).orderBy(students.name);
+  return db
+    .select()
+    .from(students)
+    .where(and(eq(students.userId, userId), eq(students.classId, classId)))
+    .orderBy(students.name);
 }
 
 export async function createStudents(data: InsertStudent[]) {
@@ -394,50 +525,76 @@ export async function createStudents(data: InsertStudent[]) {
   return db.insert(students).values(data);
 }
 
-export async function createStudentCommentGenerations(data: InsertStudentCommentGeneration[]) {
+export async function createStudentCommentGenerations(
+  data: InsertStudentCommentGeneration[]
+) {
   if (data.length === 0) return;
   const db = await getDb();
   if (!db) throw new Error("Database not available");
   return db.insert(studentCommentGenerations).values(data);
 }
 
-export async function getStructuredCommentHistory(userId: number, classId: number, term?: string) {
+export async function getStructuredCommentHistory(
+  userId: number,
+  classId: number,
+  term?: string
+) {
   const db = await getDb();
   if (!db) return [];
-  const conditions = [eq(studentCommentGenerations.userId, userId), eq(studentCommentGenerations.classId, classId)];
+  const conditions = [
+    eq(studentCommentGenerations.userId, userId),
+    eq(studentCommentGenerations.classId, classId),
+  ];
   if (term) {
     conditions.push(eq(studentCommentGenerations.term, term));
   }
-  return db.select().from(studentCommentGenerations).where(and(...conditions)).orderBy(desc(studentCommentGenerations.generatedAt));
+  return db
+    .select()
+    .from(studentCommentGenerations)
+    .where(and(...conditions))
+    .orderBy(desc(studentCommentGenerations.generatedAt));
 }
 
-export async function getPerformanceTrend(userId: number, classId: number, studentId: number) {
+export async function getPerformanceTrend(
+  userId: number,
+  classId: number,
+  studentId: number
+) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(studentPerformanceRecords)
-    .where(and(
-      eq(studentPerformanceRecords.userId, userId),
-      eq(studentPerformanceRecords.classId, classId),
-      eq(studentPerformanceRecords.studentId, studentId),
-    ))
+  return db
+    .select()
+    .from(studentPerformanceRecords)
+    .where(
+      and(
+        eq(studentPerformanceRecords.userId, userId),
+        eq(studentPerformanceRecords.classId, classId),
+        eq(studentPerformanceRecords.studentId, studentId)
+      )
+    )
     .orderBy(desc(studentPerformanceRecords.recordAt));
 }
 
 // Search & Filter Generation History
-export async function searchGenerationHistory(userId: number, options: {
-  search?: string;
-  resourceType?: string;
-  favoritesOnly?: boolean;
-  folderId?: number;
-  tagIds?: number[];
-}) {
+export async function searchGenerationHistory(
+  userId: number,
+  options: {
+    search?: string;
+    resourceType?: string;
+    favoritesOnly?: boolean;
+    folderId?: number;
+    tagIds?: number[];
+  }
+) {
   const db = await getDb();
   if (!db) return [];
 
   const conditions = [eq(generationHistory.userId, userId)];
 
   if (options.resourceType) {
-    conditions.push(sql`${generationHistory.resourceType} = ${options.resourceType}`);
+    conditions.push(
+      sql`${generationHistory.resourceType} = ${options.resourceType}`
+    );
   }
 
   if (options.favoritesOnly) {
@@ -449,7 +606,7 @@ export async function searchGenerationHistory(userId: number, options: {
     conditions.push(
       or(
         like(generationHistory.title, searchPattern),
-        like(generationHistory.prompt, searchPattern),
+        like(generationHistory.prompt, searchPattern)
       )!
     );
   }
@@ -459,13 +616,20 @@ export async function searchGenerationHistory(userId: number, options: {
   }
 
   if (options.tagIds && options.tagIds.length > 0) {
-    const generationFilter = db.select({ generationId: generationHistoryTags.generationId })
+    const generationFilter = db
+      .select({ generationId: generationHistoryTags.generationId })
       .from(generationHistoryTags)
-      .where(and(eq(generationHistoryTags.userId, userId), inArray(generationHistoryTags.tagId, options.tagIds)));
+      .where(
+        and(
+          eq(generationHistoryTags.userId, userId),
+          inArray(generationHistoryTags.tagId, options.tagIds)
+        )
+      );
     conditions.push(inArray(generationHistory.id, generationFilter));
   }
 
-  return await db.select()
+  return await db
+    .select()
     .from(generationHistory)
     .where(and(...conditions))
     .orderBy(desc(generationHistory.createdAt));
@@ -474,7 +638,11 @@ export async function searchGenerationHistory(userId: number, options: {
 export async function getFoldersByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(folders).where(eq(folders.userId, userId)).orderBy(folders.name);
+  return db
+    .select()
+    .from(folders)
+    .where(eq(folders.userId, userId))
+    .orderBy(folders.name);
 }
 
 export async function createFolder(data: InsertFolder) {
@@ -486,7 +654,11 @@ export async function createFolder(data: InsertFolder) {
 export async function getResourceTagsByUserId(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  return db.select().from(resourceTags).where(eq(resourceTags.userId, userId)).orderBy(resourceTags.name);
+  return db
+    .select()
+    .from(resourceTags)
+    .where(eq(resourceTags.userId, userId))
+    .orderBy(resourceTags.name);
 }
 
 export async function createResourceTag(data: InsertResourceTag) {
@@ -495,21 +667,47 @@ export async function createResourceTag(data: InsertResourceTag) {
   return db.insert(resourceTags).values(data);
 }
 
-export async function setKnowledgeFileTags(userId: number, knowledgeFileId: number, tagIds: number[]) {
+export async function setKnowledgeFileTags(
+  userId: number,
+  knowledgeFileId: number,
+  tagIds: number[]
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(knowledgeFileTags).where(and(eq(knowledgeFileTags.userId, userId), eq(knowledgeFileTags.knowledgeFileId, knowledgeFileId)));
+  await db
+    .delete(knowledgeFileTags)
+    .where(
+      and(
+        eq(knowledgeFileTags.userId, userId),
+        eq(knowledgeFileTags.knowledgeFileId, knowledgeFileId)
+      )
+    );
   if (tagIds.length > 0) {
-    await db.insert(knowledgeFileTags).values(tagIds.map(tagId => ({ userId, knowledgeFileId, tagId })));
+    await db
+      .insert(knowledgeFileTags)
+      .values(tagIds.map(tagId => ({ userId, knowledgeFileId, tagId })));
   }
 }
 
-export async function setGenerationTags(userId: number, generationId: number, tagIds: number[]) {
+export async function setGenerationTags(
+  userId: number,
+  generationId: number,
+  tagIds: number[]
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
-  await db.delete(generationHistoryTags).where(and(eq(generationHistoryTags.userId, userId), eq(generationHistoryTags.generationId, generationId)));
+  await db
+    .delete(generationHistoryTags)
+    .where(
+      and(
+        eq(generationHistoryTags.userId, userId),
+        eq(generationHistoryTags.generationId, generationId)
+      )
+    );
   if (tagIds.length > 0) {
-    await db.insert(generationHistoryTags).values(tagIds.map(tagId => ({ userId, generationId, tagId })));
+    await db
+      .insert(generationHistoryTags)
+      .values(tagIds.map(tagId => ({ userId, generationId, tagId })));
   }
 }
 
@@ -518,15 +716,19 @@ export async function toggleFavorite(id: number, userId: number) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const record = await db.select()
+  const record = await db
+    .select()
     .from(generationHistory)
-    .where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)))
+    .where(
+      and(eq(generationHistory.id, id), eq(generationHistory.userId, userId))
+    )
     .limit(1);
 
   if (record.length === 0) throw new Error("记录不存在");
 
   const newValue = record[0].isFavorite === 1 ? 0 : 1;
-  await db.update(generationHistory)
+  await db
+    .update(generationHistory)
     .set({ isFavorite: newValue })
     .where(eq(generationHistory.id, id));
 
@@ -534,19 +736,27 @@ export async function toggleFavorite(id: number, userId: number) {
 }
 
 // Share/Unshare
-export async function toggleShare(id: number, userId: number, shareToken: string) {
+export async function toggleShare(
+  id: number,
+  userId: number,
+  shareToken: string
+) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
 
-  const record = await db.select()
+  const record = await db
+    .select()
     .from(generationHistory)
-    .where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)))
+    .where(
+      and(eq(generationHistory.id, id), eq(generationHistory.userId, userId))
+    )
     .limit(1);
 
   if (record.length === 0) throw new Error("记录不存在");
 
   const isCurrentlyShared = record[0].isShared === 1;
-  await db.update(generationHistory)
+  await db
+    .update(generationHistory)
     .set({
       isShared: isCurrentlyShared ? 0 : 1,
       shareToken: isCurrentlyShared ? null : shareToken,
@@ -561,15 +771,16 @@ export async function getSharedResources() {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select({
-    id: generationHistory.id,
-    resourceType: generationHistory.resourceType,
-    title: generationHistory.title,
-    prompt: generationHistory.prompt,
-    content: generationHistory.content,
-    createdAt: generationHistory.createdAt,
-    shareToken: generationHistory.shareToken,
-  })
+  return await db
+    .select({
+      id: generationHistory.id,
+      resourceType: generationHistory.resourceType,
+      title: generationHistory.title,
+      prompt: generationHistory.prompt,
+      content: generationHistory.content,
+      createdAt: generationHistory.createdAt,
+      shareToken: generationHistory.shareToken,
+    })
     .from(generationHistory)
     .where(eq(generationHistory.isShared, 1))
     .orderBy(desc(generationHistory.createdAt));
@@ -580,13 +791,157 @@ export async function getSharedResourceByToken(token: string) {
   const db = await getDb();
   if (!db) return undefined;
 
-  const result = await db.select()
+  const result = await db
+    .select()
     .from(generationHistory)
-    .where(and(
-      eq(generationHistory.shareToken, token),
-      eq(generationHistory.isShared, 1),
-    ))
+    .where(
+      and(
+        eq(generationHistory.shareToken, token),
+        eq(generationHistory.isShared, 1)
+      )
+    )
     .limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+function mergeContent(base: string, incoming: string, current: string) {
+  if (current === base) return incoming;
+  if (incoming === current) return current;
+  if (incoming === base) return current;
+  return `${current}
+
+<<<<<<< 新提交
+${incoming}
+>>>>>>>`;
+}
+
+export async function getOrCreateCollaborationSession(
+  generationId: number,
+  ownerId: number,
+  seedContent: string
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const found = await db
+    .select()
+    .from(collaborationSessions)
+    .where(eq(collaborationSessions.generationId, generationId))
+    .limit(1);
+  if (found.length > 0) return found[0];
+
+  await db.insert(collaborationSessions).values({
+    generationId,
+    ownerId,
+    participants: [{ userId: ownerId, permission: "edit" }],
+    docContent: seedContent,
+    revision: 1,
+  });
+
+  const created = await db
+    .select()
+    .from(collaborationSessions)
+    .where(eq(collaborationSessions.generationId, generationId))
+    .limit(1);
+  return created[0];
+}
+
+export async function syncCollaborationDocument(
+  generationId: number,
+  content: string,
+  baseRevision: number
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const rows = await db
+    .select()
+    .from(collaborationSessions)
+    .where(eq(collaborationSessions.generationId, generationId))
+    .limit(1);
+  if (!rows[0]) throw new Error("协作会话不存在");
+  const session = rows[0];
+
+  const merged =
+    baseRevision === session.revision
+      ? content
+      : mergeContent(session.docContent, content, session.docContent);
+  const nextRevision = session.revision + 1;
+
+  await db
+    .update(collaborationSessions)
+    .set({ docContent: merged, revision: nextRevision })
+    .where(eq(collaborationSessions.id, session.id));
+  return { content: merged, revision: nextRevision };
+}
+
+export async function updatePresence(
+  generationId: number,
+  userId: number,
+  state: "online" | "idle" | "offline",
+  cursorAnchor?: string
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db
+    .insert(resourcePresence)
+    .values({
+      generationId,
+      userId,
+      state,
+      cursorAnchor,
+      lastSeenAt: new Date(),
+    })
+    .onDuplicateKeyUpdate({
+      set: {
+        state,
+        cursorAnchor: cursorAnchor ?? null,
+        lastSeenAt: new Date(),
+      },
+    });
+}
+
+export async function listPresence(generationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(resourcePresence)
+    .where(eq(resourcePresence.generationId, generationId));
+}
+
+export async function addResourceComment(data: {
+  generationId: number;
+  anchor: string;
+  content: string;
+  authorId: number;
+  parentId?: number;
+}) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(resourceComments).values(data);
+}
+
+export async function listResourceComments(generationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db
+    .select()
+    .from(resourceComments)
+    .where(eq(resourceComments.generationId, generationId))
+    .orderBy(desc(resourceComments.createdAt));
+}
+
+export async function updateResourceCommentStatus(
+  id: number,
+  status: "open" | "resolved"
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db
+    .update(resourceComments)
+    .set({ status })
+    .where(eq(resourceComments.id, id));
 }

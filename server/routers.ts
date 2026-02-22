@@ -11,13 +11,32 @@ import { generateImage } from "./_core/imageGeneration";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { extractTextFromBuffer } from "./_core/textExtraction";
 import { splitTextIntoChunks } from "./_core/chunking";
-import { retrieveRelevantChunks, formatRetrievalContext } from "./_core/ragRetrieval";
+import {
+  retrieveRelevantChunks,
+  formatRetrievalContext,
+} from "./_core/ragRetrieval";
 
 const allResourceTypes = [
-  "courseware", "exam", "lesson_plan", "lesson_plan_unit", "transcript", "lecture_script", "homework", "question_design",
-  "grading_rubric", "learning_report", "interactive_game", "discussion_chain", "mind_map",
-  "parent_letter", "parent_meeting_speech", "pbl_project", "school_curriculum", "competition_questions",
-  "pacing_guide", "differentiated_reading",
+  "courseware",
+  "exam",
+  "lesson_plan",
+  "lesson_plan_unit",
+  "transcript",
+  "lecture_script",
+  "homework",
+  "question_design",
+  "grading_rubric",
+  "learning_report",
+  "interactive_game",
+  "discussion_chain",
+  "mind_map",
+  "parent_letter",
+  "parent_meeting_speech",
+  "pbl_project",
+  "school_curriculum",
+  "competition_questions",
+  "pacing_guide",
+  "differentiated_reading",
 ] as const;
 
 const resourceTypeZod = z.enum(allResourceTypes);
@@ -38,13 +57,15 @@ export const appRouter = router({
 
   user: router({
     updateProfile: protectedProcedure
-      .input(z.object({
-        name: z.string().optional(),
-        school: z.string().optional(),
-        subject: z.string().optional(),
-        grade: z.string().optional(),
-        bio: z.string().optional(),
-      }))
+      .input(
+        z.object({
+          name: z.string().optional(),
+          school: z.string().optional(),
+          subject: z.string().optional(),
+          grade: z.string().optional(),
+          bio: z.string().optional(),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         await db.upsertUser({
           openId: ctx.user.openId,
@@ -56,21 +77,30 @@ export const appRouter = router({
 
   knowledge: router({
     list: protectedProcedure
-      .input(z.object({ folderId: z.number().optional(), tagIds: z.array(z.number()).optional() }).optional())
+      .input(
+        z
+          .object({
+            folderId: z.number().optional(),
+            tagIds: z.array(z.number()).optional(),
+          })
+          .optional()
+      )
       .query(async ({ ctx, input }) => {
         return await db.getKnowledgeFilesByUserId(ctx.user.id, input);
       }),
 
     upload: protectedProcedure
-      .input(z.object({
-        fileName: z.string(),
-        fileContent: z.string(), // Base64 encoded
-        mimeType: z.string(),
-        folderId: z.number().optional(),
-        tagIds: z.array(z.number()).optional(),
-      }))
+      .input(
+        z.object({
+          fileName: z.string(),
+          fileContent: z.string(), // Base64 encoded
+          mimeType: z.string(),
+          folderId: z.number().optional(),
+          tagIds: z.array(z.number()).optional(),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
-        const buffer = Buffer.from(input.fileContent, 'base64');
+        const buffer = Buffer.from(input.fileContent, "base64");
         const fileKey = `knowledge/${ctx.user.id}/${Date.now()}-${input.fileName}`;
         const { url } = await storagePut(fileKey, buffer, input.mimeType);
 
@@ -93,7 +123,11 @@ export const appRouter = router({
         // Async text extraction and chunking (non-blocking)
         (async () => {
           try {
-            const textContent = await extractTextFromBuffer(buffer, input.mimeType, input.fileName);
+            const textContent = await extractTextFromBuffer(
+              buffer,
+              input.mimeType,
+              input.fileName
+            );
 
             if (!textContent || textContent.trim().length === 0) {
               await db.updateKnowledgeFile(fileId, {
@@ -124,10 +158,15 @@ export const appRouter = router({
               processingStatus: "completed",
             });
           } catch (error) {
-            console.error("[RAG] Text extraction failed for file:", input.fileName, error);
+            console.error(
+              "[RAG] Text extraction failed for file:",
+              input.fileName,
+              error
+            );
             await db.updateKnowledgeFile(fileId, {
               processingStatus: "failed",
-              processingError: error instanceof Error ? error.message : "文本提取失败",
+              processingError:
+                error instanceof Error ? error.message : "文本提取失败",
             });
           }
         })();
@@ -145,15 +184,17 @@ export const appRouter = router({
 
   generation: router({
     generate: protectedProcedure
-      .input(z.object({
-        resourceType: resourceTypeZod,
-        title: z.string(),
-        prompt: z.string(),
-        parameters: z.record(z.string(), z.any()).optional(),
-        knowledgeFileIds: z.array(z.number()).optional(),
-        folderId: z.number().optional(),
-        tagIds: z.array(z.number()).optional(),
-      }))
+      .input(
+        z.object({
+          resourceType: resourceTypeZod,
+          title: z.string(),
+          prompt: z.string(),
+          parameters: z.record(z.string(), z.any()).optional(),
+          knowledgeFileIds: z.array(z.number()).optional(),
+          folderId: z.number().optional(),
+          tagIds: z.array(z.number()).optional(),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         // Create initial record
         const result = await db.createGenerationHistory({
@@ -178,7 +219,9 @@ export const appRouter = router({
           let knowledgeContext = "";
           let retrievalSnapshot = "";
           if (input.knowledgeFileIds && input.knowledgeFileIds.length > 0) {
-            const files = await db.getKnowledgeFilesByIds(input.knowledgeFileIds);
+            const files = await db.getKnowledgeFilesByIds(
+              input.knowledgeFileIds
+            );
             const fileNameMap: Record<number, string> = {};
             for (const f of files) {
               fileNameMap[f.id] = f.fileName;
@@ -215,9 +258,17 @@ export const appRouter = router({
             systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
           }
 
-          const structuredParameterLines = Object.entries(input.parameters || {})
-            .filter(([key, value]) => value !== undefined && value !== null && value !== "")
-            .map(([key, value]) => `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+          const structuredParameterLines = Object.entries(
+            input.parameters || {}
+          )
+            .filter(
+              ([key, value]) =>
+                value !== undefined && value !== null && value !== ""
+            )
+            .map(
+              ([key, value]) =>
+                `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`
+            );
 
           if (structuredParameterLines.length > 0) {
             systemPrompt += `\n\n【结构化参数约束（必须显式执行）】\n${structuredParameterLines.join("\n")}\n请将以上参数作为硬约束写入生成内容，不得忽略。`;
@@ -236,13 +287,16 @@ export const appRouter = router({
           });
 
           const messageContent = response.choices[0]?.message?.content;
-          const content = typeof messageContent === 'string' ? messageContent : "";
+          const content =
+            typeof messageContent === "string" ? messageContent : "";
 
           // Update with generated content and retrieval snapshot
           await db.updateGenerationHistory(historyId, {
             content,
             status: "completed",
-            ...(retrievalSnapshot ? { retrievalContext: retrievalSnapshot } : {}),
+            ...(retrievalSnapshot
+              ? { retrievalContext: retrievalSnapshot }
+              : {}),
           });
 
           await db.createGenerationHistoryVersion({
@@ -268,13 +322,15 @@ export const appRouter = router({
     }),
 
     search: protectedProcedure
-      .input(z.object({
-        search: z.string().optional(),
-        resourceType: z.string().optional(),
-        favoritesOnly: z.boolean().optional(),
-        folderId: z.number().optional(),
-        tagIds: z.array(z.number()).optional(),
-      }))
+      .input(
+        z.object({
+          search: z.string().optional(),
+          resourceType: z.string().optional(),
+          favoritesOnly: z.boolean().optional(),
+          folderId: z.number().optional(),
+          tagIds: z.array(z.number()).optional(),
+        })
+      )
       .query(async ({ ctx, input }) => {
         return await db.searchGenerationHistory(ctx.user.id, input);
       }),
@@ -286,12 +342,14 @@ export const appRouter = router({
       }),
 
     update: protectedProcedure
-      .input(z.object({
-        id: z.number(),
-        title: z.string().optional(),
-        content: z.string().optional(),
-        changeSummary: z.string().optional(),
-      }))
+      .input(
+        z.object({
+          id: z.number(),
+          title: z.string().optional(),
+          content: z.string().optional(),
+          changeSummary: z.string().optional(),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         await db.updateGenerationHistory(input.id, {
           title: input.title,
@@ -299,7 +357,8 @@ export const appRouter = router({
         });
 
         if (typeof input.content === "string") {
-          const nextVersionNo = (await db.getLatestGenerationVersionNo(input.id)) + 1;
+          const nextVersionNo =
+            (await db.getLatestGenerationVersionNo(input.id)) + 1;
           await db.createGenerationHistoryVersion({
             generationId: input.id,
             versionNo: nextVersionNo,
@@ -320,14 +379,19 @@ export const appRouter = router({
     rollbackVersion: protectedProcedure
       .input(z.object({ generationId: z.number(), versionNo: z.number() }))
       .mutation(async ({ ctx, input }) => {
-        const versions = await db.getGenerationHistoryVersions(input.generationId);
+        const versions = await db.getGenerationHistoryVersions(
+          input.generationId
+        );
         const target = versions.find(v => v.versionNo === input.versionNo);
         if (!target) {
           throw new Error("版本不存在");
         }
 
-        await db.updateGenerationHistory(input.generationId, { content: target.contentSnapshot });
-        const nextVersionNo = (await db.getLatestGenerationVersionNo(input.generationId)) + 1;
+        await db.updateGenerationHistory(input.generationId, {
+          content: target.contentSnapshot,
+        });
+        const nextVersionNo =
+          (await db.getLatestGenerationVersionNo(input.generationId)) + 1;
         await db.createGenerationHistoryVersion({
           generationId: input.generationId,
           versionNo: nextVersionNo,
@@ -373,15 +437,19 @@ export const appRouter = router({
       }),
 
     export: protectedProcedure
-      .input(z.object({
-        generationHistoryId: z.number().optional(),
-        markdown: z.string().optional(),
-        title: z.string().optional(),
-        resourceType: resourceTypeZod.optional(),
-        format: z.enum(["pptx", "docx", "pdf"]),
-      }))
+      .input(
+        z.object({
+          generationHistoryId: z.number().optional(),
+          markdown: z.string().optional(),
+          title: z.string().optional(),
+          resourceType: resourceTypeZod.optional(),
+          format: z.enum(["pptx", "docx", "pdf"]),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
-        const history = input.generationHistoryId ? await db.getGenerationHistoryById(input.generationHistoryId) : undefined;
+        const history = input.generationHistoryId
+          ? await db.getGenerationHistoryById(input.generationHistoryId)
+          : undefined;
         if (input.generationHistoryId && !history) {
           throw new Error("记录不存在");
         }
@@ -406,17 +474,26 @@ export const appRouter = router({
 
         let cleanupDir = "";
         try {
-          const artifact = await buildExportFile({ title, markdown, format: input.format, resourceType });
+          const artifact = await buildExportFile({
+            title,
+            markdown,
+            format: input.format,
+            resourceType,
+          });
           cleanupDir = artifact.cleanupDir;
           const filename = `${title}.${artifact.extension}`;
 
           let fileUrl: string | null = null;
           try {
-            const upload = await storagePut(`exports/${ctx.user.id}/${exportId}-${filename}`, artifact.buffer, {
-              pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-              docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-              pdf: "application/pdf",
-            }[input.format]);
+            const upload = await storagePut(
+              `exports/${ctx.user.id}/${exportId}-${filename}`,
+              artifact.buffer,
+              {
+                pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                pdf: "application/pdf",
+              }[input.format]
+            );
             fileUrl = upload.url;
             await db.updateGenerationExportTask(exportId, {
               status: "completed",
@@ -454,35 +531,170 @@ export const appRouter = router({
     listExports: protectedProcedure
       .input(z.object({ generationHistoryId: z.number() }))
       .query(async ({ ctx, input }) => {
-        return await db.getGenerationExportTasksByHistoryId(input.generationHistoryId, ctx.user.id);
+        return await db.getGenerationExportTasksByHistoryId(
+          input.generationHistoryId,
+          ctx.user.id
+        );
       }),
   }),
 
   organization: router({
-    listFolders: protectedProcedure.query(async ({ ctx }) => db.getFoldersByUserId(ctx.user.id)),
+    listFolders: protectedProcedure.query(async ({ ctx }) =>
+      db.getFoldersByUserId(ctx.user.id)
+    ),
     createFolder: protectedProcedure
-      .input(z.object({ name: z.string().min(1), parentId: z.number().optional() }))
+      .input(
+        z.object({ name: z.string().min(1), parentId: z.number().optional() })
+      )
       .mutation(async ({ ctx, input }) => {
-        await db.createFolder({ userId: ctx.user.id, name: input.name, parentId: input.parentId });
+        await db.createFolder({
+          userId: ctx.user.id,
+          name: input.name,
+          parentId: input.parentId,
+        });
         return { success: true };
       }),
-    listTags: protectedProcedure.query(async ({ ctx }) => db.getResourceTagsByUserId(ctx.user.id)),
+    listTags: protectedProcedure.query(async ({ ctx }) =>
+      db.getResourceTagsByUserId(ctx.user.id)
+    ),
     createTag: protectedProcedure
-      .input(z.object({ name: z.string().min(1), color: z.string().optional() }))
+      .input(
+        z.object({ name: z.string().min(1), color: z.string().optional() })
+      )
       .mutation(async ({ ctx, input }) => {
-        await db.createResourceTag({ userId: ctx.user.id, name: input.name, color: input.color });
+        await db.createResourceTag({
+          userId: ctx.user.id,
+          name: input.name,
+          color: input.color,
+        });
         return { success: true };
       }),
   }),
 
+  collaboration: router({
+    getSession: protectedProcedure
+      .input(z.object({ generationId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        const resource = await db.getGenerationHistoryById(input.generationId);
+        if (!resource) throw new Error("资源不存在");
+
+        const session = await db.getOrCreateCollaborationSession(
+          input.generationId,
+          resource.userId,
+          resource.content || ""
+        );
+        const comments = await db.listResourceComments(input.generationId);
+        const presence = await db.listPresence(input.generationId);
+        const participant = (
+          session.participants as Array<{ userId: number; permission: string }>
+        ).find(p => p.userId === ctx.user.id);
+        const permission =
+          participant?.permission ||
+          (resource.userId === ctx.user.id ? "edit" : "read");
+
+        return {
+          sessionId: session.id,
+          content: session.docContent,
+          revision: session.revision,
+          permission,
+          comments,
+          presence,
+        };
+      }),
+
+    syncDocument: protectedProcedure
+      .input(
+        z.object({
+          generationId: z.number(),
+          content: z.string(),
+          baseRevision: z.number(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const session = await db.getOrCreateCollaborationSession(
+          input.generationId,
+          ctx.user.id,
+          ""
+        );
+        const participant = (
+          session.participants as Array<{ userId: number; permission: string }>
+        ).find(p => p.userId === ctx.user.id);
+        const permission =
+          participant?.permission ||
+          (session.ownerId === ctx.user.id ? "edit" : "read");
+        if (permission !== "edit") {
+          throw new Error("当前权限不允许编辑");
+        }
+        return db.syncCollaborationDocument(
+          input.generationId,
+          input.content,
+          input.baseRevision
+        );
+      }),
+
+    updatePresence: protectedProcedure
+      .input(
+        z.object({
+          generationId: z.number(),
+          state: z.enum(["online", "idle", "offline"]),
+          cursorAnchor: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.updatePresence(
+          input.generationId,
+          ctx.user.id,
+          input.state,
+          input.cursorAnchor
+        );
+        return { success: true };
+      }),
+
+    addComment: protectedProcedure
+      .input(
+        z.object({
+          generationId: z.number(),
+          anchor: z.string(),
+          content: z.string().min(1),
+          parentId: z.number().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        await db.addResourceComment({ ...input, authorId: ctx.user.id });
+        return { success: true };
+      }),
+
+    updateCommentStatus: protectedProcedure
+      .input(
+        z.object({
+          commentId: z.number(),
+          status: z.enum(["open", "resolved"]),
+        })
+      )
+      .mutation(async ({ input }) => {
+        await db.updateResourceCommentStatus(input.commentId, input.status);
+        return { success: true };
+      }),
+
+    listPresence: protectedProcedure
+      .input(z.object({ generationId: z.number() }))
+      .query(async ({ input }) => db.listPresence(input.generationId)),
+
+    listComments: protectedProcedure
+      .input(z.object({ generationId: z.number() }))
+      .query(async ({ input }) => db.listResourceComments(input.generationId)),
+  }),
+
   comments: router({
     createClass: protectedProcedure
-      .input(z.object({
-        name: z.string().min(1),
-        stage: z.string().min(1),
-        grade: z.string().min(1),
-        term: z.string().min(1),
-      }))
+      .input(
+        z.object({
+          name: z.string().min(1),
+          stage: z.string().min(1),
+          grade: z.string().min(1),
+          term: z.string().min(1),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         const result = await db.createClass({ userId: ctx.user.id, ...input });
         return { success: true, classId: Number((result as any).insertId) };
@@ -499,38 +711,50 @@ export const appRouter = router({
       }),
 
     upsertStudents: protectedProcedure
-      .input(z.object({
-        classId: z.number(),
-        students: z.array(z.object({
-          name: z.string().min(1),
-          studentNo: z.string().optional(),
-          status: z.enum(["active", "inactive", "graduated"]).default("active"),
-        })),
-      }))
+      .input(
+        z.object({
+          classId: z.number(),
+          students: z.array(
+            z.object({
+              name: z.string().min(1),
+              studentNo: z.string().optional(),
+              status: z
+                .enum(["active", "inactive", "graduated"])
+                .default("active"),
+            })
+          ),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
-        await db.createStudents(input.students.map((student) => ({
-          userId: ctx.user.id,
-          classId: input.classId,
-          name: student.name,
-          studentNo: student.studentNo,
-          status: student.status,
-        })));
+        await db.createStudents(
+          input.students.map(student => ({
+            userId: ctx.user.id,
+            classId: input.classId,
+            name: student.name,
+            studentNo: student.studentNo,
+            status: student.status,
+          }))
+        );
         return { success: true };
       }),
 
     // 创建批量评语任务
     createBatch: protectedProcedure
-      .input(z.object({
-        classId: z.number(),
-        term: z.string().min(1),
-        batchTitle: z.string(),
-        commentType: z.enum(["final_term", "homework", "daily", "custom"]),
-        students: z.array(z.object({
-          studentId: z.number(),
-          name: z.string(),
-          performance: z.string(), // 学生表现描述
-        })),
-      }))
+      .input(
+        z.object({
+          classId: z.number(),
+          term: z.string().min(1),
+          batchTitle: z.string(),
+          commentType: z.enum(["final_term", "homework", "daily", "custom"]),
+          students: z.array(
+            z.object({
+              studentId: z.number(),
+              name: z.string(),
+              performance: z.string(), // 学生表现描述
+            })
+          ),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         // 创建初始记录
         const result = await db.createStudentCommentBatch({
@@ -548,17 +772,23 @@ export const appRouter = router({
         (async () => {
           try {
             const studentsWithComments = await Promise.all(
-              input.students.map(async (student) => {
+              input.students.map(async student => {
                 const systemPrompt = getCommentSystemPrompt(input.commentType);
                 const response = await invokeLLM({
                   messages: [
                     { role: "system", content: systemPrompt },
-                    { role: "user", content: `学生姓名：${student.name}\n表现描述：${student.performance}` },
+                    {
+                      role: "user",
+                      content: `学生姓名：${student.name}\n表现描述：${student.performance}`,
+                    },
                   ],
                 });
 
                 const messageContent = response.choices[0]?.message?.content;
-                const comment = typeof messageContent === 'string' ? messageContent : "生成失败";
+                const comment =
+                  typeof messageContent === "string"
+                    ? messageContent
+                    : "生成失败";
 
                 return {
                   name: student.name,
@@ -573,17 +803,19 @@ export const appRouter = router({
               status: "completed",
             });
 
-            await db.createStudentCommentGenerations(studentsWithComments.map((student, index) => ({
-              userId: ctx.user.id,
-              classId: input.classId,
-              studentId: input.students[index].studentId,
-              term: input.term,
-              batchTitle: input.batchTitle,
-              commentType: input.commentType,
-              performance: student.performance,
-              comment: student.comment,
-              status: "completed",
-            })));
+            await db.createStudentCommentGenerations(
+              studentsWithComments.map((student, index) => ({
+                userId: ctx.user.id,
+                classId: input.classId,
+                studentId: input.students[index].studentId,
+                term: input.term,
+                batchTitle: input.batchTitle,
+                commentType: input.commentType,
+                performance: student.performance,
+                comment: student.comment,
+                status: "completed",
+              }))
+            );
           } catch (error) {
             await db.updateStudentComment(batchId, {
               status: "failed",
@@ -602,13 +834,21 @@ export const appRouter = router({
     history: protectedProcedure
       .input(z.object({ classId: z.number(), term: z.string().optional() }))
       .query(async ({ ctx, input }) => {
-        return await db.getStructuredCommentHistory(ctx.user.id, input.classId, input.term);
+        return await db.getStructuredCommentHistory(
+          ctx.user.id,
+          input.classId,
+          input.term
+        );
       }),
 
     trend: protectedProcedure
       .input(z.object({ classId: z.number(), studentId: z.number() }))
       .query(async ({ ctx, input }) => {
-        return await db.getPerformanceTrend(ctx.user.id, input.classId, input.studentId);
+        return await db.getPerformanceTrend(
+          ctx.user.id,
+          input.classId,
+          input.studentId
+        );
       }),
 
     // 获取单个评语批次
@@ -637,15 +877,17 @@ export const appRouter = router({
     }),
 
     upload: protectedProcedure
-      .input(z.object({
-        resourceType: resourceTypeZod,
-        title: z.string(),
-        description: z.string().optional(),
-        content: z.string(),
-        subject: z.string().optional(),
-        grade: z.string().optional(),
-        tags: z.array(z.string()).optional(),
-      }))
+      .input(
+        z.object({
+          resourceType: resourceTypeZod,
+          title: z.string(),
+          description: z.string().optional(),
+          content: z.string(),
+          subject: z.string().optional(),
+          grade: z.string().optional(),
+          tags: z.array(z.string()).optional(),
+        })
+      )
       .mutation(async ({ ctx, input }) => {
         await db.createTemplate({
           resourceType: input.resourceType,
@@ -686,10 +928,12 @@ export const appRouter = router({
   // 多模态功能：AI图片生成
   imageGen: router({
     generate: protectedProcedure
-      .input(z.object({
-        prompt: z.string(),
-        originalImageUrl: z.string().optional(),
-      }))
+      .input(
+        z.object({
+          prompt: z.string(),
+          originalImageUrl: z.string().optional(),
+        })
+      )
       .mutation(async ({ input }) => {
         const result = await generateImage({
           prompt: input.prompt,
@@ -704,15 +948,17 @@ export const appRouter = router({
   // 多模态功能：语音转文字
   voice: router({
     transcribe: protectedProcedure
-      .input(z.object({
-        audioUrl: z.string(),
-        language: z.string().optional(),
-        prompt: z.string().optional(),
-      }))
+      .input(
+        z.object({
+          audioUrl: z.string(),
+          language: z.string().optional(),
+          prompt: z.string().optional(),
+        })
+      )
       .mutation(async ({ input }) => {
         const result = await transcribeAudio(input);
 
-        if ('error' in result) {
+        if ("error" in result) {
           throw new Error(result.error);
         }
 
