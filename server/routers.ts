@@ -5,6 +5,7 @@ import { publicProcedure, protectedProcedure, router } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
 import { storagePut } from "./storage";
+import { buildExportFile, cleanupExportTempDir } from "./exportService";
 import { invokeLLM } from "./_core/llm";
 import { generateImage } from "./_core/imageGeneration";
 import { transcribeAudio } from "./_core/voiceTranscription";
@@ -301,81 +302,87 @@ export const appRouter = router({
 
     export: protectedProcedure
       .input(z.object({
-        id: z.number(),
-        format: z.enum(["word", "ppt", "pdf"]),
+        generationHistoryId: z.number().optional(),
+        markdown: z.string().optional(),
+        title: z.string().optional(),
+        resourceType: resourceTypeZod.optional(),
+        format: z.enum(["pptx", "docx", "pdf"]),
       }))
-      .mutation(async ({ input }) => {
-        const history = await db.getGenerationHistoryById(input.id);
-        if (!history) {
+      .mutation(async ({ ctx, input }) => {
+        const history = input.generationHistoryId ? await db.getGenerationHistoryById(input.generationHistoryId) : undefined;
+        if (input.generationHistoryId && !history) {
           throw new Error("记录不存在");
         }
 
-        const { execSync } = require("child_process");
-        const path = require("path");
-        const fs = require("fs");
-        const { nanoid } = require("nanoid");
-
-        // Create temp directory if not exists
-        const tempDir = path.join(process.cwd(), "temp");
-        if (!fs.existsSync(tempDir)) {
-          fs.mkdirSync(tempDir, { recursive: true });
+        const title = input.title || history?.title || "未命名导出";
+        const markdown = input.markdown || history?.content;
+        const resourceType = input.resourceType || history?.resourceType;
+        if (!markdown) {
+          throw new Error("缺少导出内容");
         }
 
-        const fileId = nanoid();
-        const extension = input.format === "word" ? "docx" : input.format === "ppt" ? "pptx" : "pdf";
-        const outputPath = path.join(tempDir, `${fileId}.${extension}`);
+        const createResult = await db.createGenerationExportTask({
+          userId: ctx.user.id,
+          generationHistoryId: input.generationHistoryId,
+          resourceType,
+          exportType: input.format,
+          status: "processing",
+          sourceTitle: title,
+          sourceMarkdown: markdown,
+        });
+        const exportId = Number((createResult as any).insertId);
 
+        let cleanupDir = "";
         try {
-          if (input.format === "pdf") {
-            // For PDF, first generate Word then convert
-            const wordPath = path.join(tempDir, `${fileId}.docx`);
-            const exportScript = path.join(process.cwd(), "server", "export.py");
+          const artifact = await buildExportFile({ title, markdown, format: input.format, resourceType });
+          cleanupDir = artifact.cleanupDir;
+          const filename = `${title}.${artifact.extension}`;
 
-            execSync(
-              `python3 "${exportScript}" word "${history.title}" "${history.content.replace(/"/g, '\\"')}" "${wordPath}"`,
-              { encoding: "utf-8" }
-            );
-
-            // Convert Word to PDF using LibreOffice
-            execSync(
-              `libreoffice --headless --convert-to pdf --outdir "${tempDir}" "${wordPath}"`,
-              { encoding: "utf-8", timeout: 30000 }
-            );
-
-            // Clean up Word file
-            fs.unlinkSync(wordPath);
-          } else {
-            const exportScript = path.join(process.cwd(), "server", "export.py");
-            const result = execSync(
-              `python3 "${exportScript}" ${input.format} "${history.title}" "${history.content.replace(/"/g, '\\"')}" "${outputPath}"`,
-              { encoding: "utf-8" }
-            );
-
-            const output = JSON.parse(result.trim());
-            if (output.error) {
-              throw new Error(output.error);
-            }
+          let fileUrl: string | null = null;
+          try {
+            const upload = await storagePut(`exports/${ctx.user.id}/${exportId}-${filename}`, artifact.buffer, {
+              pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              pdf: "application/pdf",
+            }[input.format]);
+            fileUrl = upload.url;
+            await db.updateGenerationExportTask(exportId, {
+              status: "completed",
+              fileName: filename,
+              fileKey: upload.key,
+              fileUrl: upload.url,
+            });
+          } catch {
+            await db.updateGenerationExportTask(exportId, {
+              status: "completed",
+              fileName: filename,
+            });
           }
-
-          // Read file and convert to base64
-          const fileBuffer = fs.readFileSync(outputPath);
-          const base64 = fileBuffer.toString("base64");
-
-          // Clean up temp file
-          fs.unlinkSync(outputPath);
 
           return {
             success: true,
-            filename: `${history.title}.${extension}`,
-            content: base64,
+            exportId,
+            filename,
+            content: artifact.buffer.toString("base64"),
+            fileUrl,
           };
         } catch (error) {
-          // Clean up on error
-          if (fs.existsSync(outputPath)) {
-            fs.unlinkSync(outputPath);
-          }
+          await db.updateGenerationExportTask(exportId, {
+            status: "failed",
+            errorMessage: error instanceof Error ? error.message : "导出失败",
+          });
           throw error;
+        } finally {
+          if (cleanupDir) {
+            await cleanupExportTempDir(cleanupDir);
+          }
         }
+      }),
+
+    listExports: protectedProcedure
+      .input(z.object({ generationHistoryId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        return await db.getGenerationExportTasksByHistoryId(input.generationHistoryId, ctx.user.id);
       }),
   }),
 

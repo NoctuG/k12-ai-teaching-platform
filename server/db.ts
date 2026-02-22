@@ -9,6 +9,8 @@ import {
   InsertKnowledgeChunk,
   generationHistory,
   InsertGenerationHistory,
+  generationExports,
+  InsertGenerationExport,
   resourceTemplates,
   InsertResourceTemplate,
   studentComments,
@@ -205,6 +207,29 @@ export async function deleteGenerationHistory(id: number, userId: number) {
   if (!db) throw new Error("Database not available");
 
   await db.delete(generationHistory).where(and(eq(generationHistory.id, id), eq(generationHistory.userId, userId)));
+}
+
+export async function createGenerationExportTask(task: InsertGenerationExport) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  return await db.insert(generationExports).values(task);
+}
+
+export async function updateGenerationExportTask(id: number, updates: Partial<InsertGenerationExport>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  await db.update(generationExports).set(updates).where(eq(generationExports.id, id));
+}
+
+export async function getGenerationExportTasksByHistoryId(generationHistoryId: number, userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(generationExports)
+    .where(and(eq(generationExports.generationHistoryId, generationHistoryId), eq(generationExports.userId, userId)))
+    .orderBy(desc(generationExports.createdAt));
 }
 
 // Resource Templates
