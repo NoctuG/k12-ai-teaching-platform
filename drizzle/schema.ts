@@ -120,6 +120,32 @@ export const generationHistory = mysqlTable("generation_history", {
 export type GenerationHistory = typeof generationHistory.$inferSelect;
 export type InsertGenerationHistory = typeof generationHistory.$inferInsert;
 
+export const exportTypeEnum = mysqlEnum("exportType", ["pptx", "docx", "pdf"]);
+export const exportStatusEnum = mysqlEnum("exportStatus", ["processing", "completed", "failed"]);
+
+/**
+ * Export task records for generated resources.
+ */
+export const generationExports = mysqlTable("generation_exports", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  generationHistoryId: int("generationHistoryId"),
+  resourceType: resourceTypeEnum,
+  exportType: exportTypeEnum.notNull(),
+  status: exportStatusEnum.default("processing").notNull(),
+  sourceTitle: varchar("sourceTitle", { length: 255 }).notNull(),
+  sourceMarkdown: text("sourceMarkdown").notNull(),
+  fileName: varchar("fileName", { length: 255 }),
+  fileKey: varchar("fileKey", { length: 512 }),
+  fileUrl: text("fileUrl"),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type GenerationExport = typeof generationExports.$inferSelect;
+export type InsertGenerationExport = typeof generationExports.$inferInsert;
+
 /**
  * Resource templates for teachers to reference
  */

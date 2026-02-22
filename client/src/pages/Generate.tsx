@@ -6,9 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Sparkles, CheckCircle2, Clock } from "lucide-react";
+import { Loader2, Sparkles, CheckCircle2, Clock, Download, RefreshCcw } from "lucide-react";
 import { Streamdown } from "streamdown";
 
 const resourceTypeGroups = [
@@ -74,10 +74,44 @@ export default function Generate() {
   const { data: knowledgeFiles } = trpc.knowledge.list.useQuery();
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
 
+  const [lastHistoryId, setLastHistoryId] = useState<number | null>(null);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [lastExportPayload, setLastExportPayload] = useState<{ generationHistoryId: number; format: "pptx" | "docx" | "pdf" } | null>(null);
+
+  const exportMutation = trpc.generation.export.useMutation({
+    onSuccess: (data) => {
+      setExportProgress(100);
+      const byteCharacters = atob(data.content);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const blob = new Blob([new Uint8Array(byteNumbers)]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("导出成功");
+    },
+    onError: (error) => {
+      toast.error("导出失败：" + error.message);
+    },
+  });
+
+  const exporting = exportMutation.isPending;
+  const exportHint = useMemo(() => {
+    if (exportMutation.isError) return "导出失败，可点击重试";
+    if (exportMutation.isSuccess) return "导出完成";
+    if (exporting) return `导出处理中 ${exportProgress}%`;
+    return "选择格式导出（PPTX / DOCX / PDF）";
+  }, [exportMutation.isError, exportMutation.isSuccess, exporting, exportProgress]);
+
   const generateMutation = trpc.generation.generate.useMutation({
     onSuccess: (data) => {
       toast.success("生成成功！");
       setGeneratedContent(data.content);
+      setLastHistoryId(data.historyId);
+      setExportProgress(0);
     },
     onError: (error) => {
       toast.error("生成失败：" + error.message);
@@ -100,6 +134,22 @@ export default function Generate() {
       prompt,
       parameters: alignCurriculumStandards ? { alignCurriculumStandards: true } : undefined,
       knowledgeFileIds: selectedFiles,
+    });
+  };
+
+  const startExport = (format: "pptx" | "docx" | "pdf") => {
+    if (!lastHistoryId) {
+      toast.error("请先生成内容");
+      return;
+    }
+    const payload = { generationHistoryId: lastHistoryId, format };
+    setLastExportPayload(payload);
+    setExportProgress(8);
+    const timer = setInterval(() => {
+      setExportProgress((prev) => (prev >= 90 ? prev : prev + 12));
+    }, 280);
+    exportMutation.mutate(payload, {
+      onSettled: () => clearInterval(timer),
     });
   };
 
@@ -242,9 +292,28 @@ export default function Generate() {
           <Card>
             <CardHeader>
               <CardTitle>生成结果</CardTitle>
-              <CardDescription>AI生成的内容将显示在这里</CardDescription>
+              <CardDescription>{exportHint}</CardDescription>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={exporting} onClick={() => startExport("pptx")}>
+                  <Download className="w-4 h-4 mr-1" />PPTX
+                </Button>
+                <Button variant="outline" size="sm" disabled={exporting} onClick={() => startExport("docx")}>
+                  <Download className="w-4 h-4 mr-1" />DOCX
+                </Button>
+                <Button variant="outline" size="sm" disabled={exporting} onClick={() => startExport("pdf")}>
+                  <Download className="w-4 h-4 mr-1" />PDF
+                </Button>
+                {exportMutation.isError && lastExportPayload && (
+                  <Button variant="ghost" size="sm" onClick={() => startExport(lastExportPayload.format)}>
+                    <RefreshCcw className="w-4 h-4 mr-1" />重试
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
+              {exporting && (
+                <div className="mb-4 text-xs text-muted-foreground">导出进度：{exportProgress}%</div>
+              )}
               {generateMutation.isPending ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />

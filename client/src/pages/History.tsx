@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine, Star, Share2, Search, Filter, Gamepad2, GitBranch, Brain, Mail, Users, Lightbulb, GraduationCap, Trophy, CalendarRange, BookOpen } from "lucide-react";
+import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine, Star, Share2, Search, Filter, Gamepad2, GitBranch, Brain, Mail, Users, Lightbulb, GraduationCap, Trophy, CalendarRange, BookOpen, RefreshCcw } from "lucide-react";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
@@ -92,6 +92,13 @@ export default function History() {
     { enabled: !!selectedItem }
   );
 
+  const [exportProgress, setExportProgress] = useState(0);
+  const [retryPayload, setRetryPayload] = useState<{ generationHistoryId: number; format: "pptx" | "docx" | "pdf" } | null>(null);
+  const { data: exportRecords, refetch: refetchExports } = trpc.generation.listExports.useQuery(
+    { generationHistoryId: selectedItem! },
+    { enabled: !!selectedItem }
+  );
+
   const exportMutation = trpc.generation.export.useMutation({
     onSuccess: (data) => {
       // Download file
@@ -109,9 +116,12 @@ export default function History() {
       a.click();
       URL.revokeObjectURL(url);
       toast.success("导出成功");
+      setExportProgress(100);
+      refetchExports();
     },
     onError: (error) => {
       toast.error("导出失败：" + error.message);
+      refetchExports();
     },
   });
 
@@ -138,6 +148,15 @@ export default function History() {
       refetch();
     },
   });
+
+  const startExport = (format: "pptx" | "docx" | "pdf") => {
+    if (!selectedHistory) return;
+    const payload = { generationHistoryId: selectedHistory.id, format };
+    setRetryPayload(payload);
+    setExportProgress(10);
+    const timer = setInterval(() => setExportProgress((prev) => (prev >= 90 ? prev : prev + 10)), 250);
+    exportMutation.mutate(payload, { onSettled: () => clearInterval(timer) });
+  };
 
   const handleDelete = (id: number) => {
     if (confirm("确定要删除这条记录吗？")) {
@@ -322,25 +341,25 @@ export default function History() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "word" })}
+                    onClick={() => startExport("docx")}
                     disabled={exportMutation.isPending}
                   >
                     <Download className="w-4 h-4 mr-1" />
-                    Word
+                    DOCX
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "ppt" })}
+                    onClick={() => startExport("pptx")}
                     disabled={exportMutation.isPending}
                   >
                     <Download className="w-4 h-4 mr-1" />
-                    PPT
+                    PPTX
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => exportMutation.mutate({ id: selectedHistory.id, format: "pdf" })}
+                    onClick={() => startExport("pdf")}
                     disabled={exportMutation.isPending}
                   >
                     <Download className="w-4 h-4 mr-1" />
@@ -351,8 +370,22 @@ export default function History() {
             </div>
           </DialogHeader>
           {selectedHistory && (
-            <div className="prose prose-sm max-w-none">
+            <div className="space-y-4">
+              {exportMutation.isPending && <div className="text-xs text-muted-foreground">导出进度：{exportProgress}%</div>}
+              {exportMutation.isError && retryPayload && (
+                <Button size="sm" variant="ghost" onClick={() => startExport(retryPayload.format)}>
+                  <RefreshCcw className="w-4 h-4 mr-1" />重试上次导出
+                </Button>
+              )}
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div>导出记录</div>
+                {(exportRecords || []).slice(0, 5).map((record: any) => (
+                  <div key={record.id}>[{record.exportType.toUpperCase()}] {record.status} {record.fileName || ""}</div>
+                ))}
+              </div>
+              <div className="prose prose-sm max-w-none">
               <Streamdown>{selectedHistory.content}</Streamdown>
+            </div>
             </div>
           )}
         </DialogContent>
