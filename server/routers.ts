@@ -55,15 +55,19 @@ export const appRouter = router({
   }),
 
   knowledge: router({
-    list: protectedProcedure.query(async ({ ctx }) => {
-      return await db.getKnowledgeFilesByUserId(ctx.user.id);
-    }),
+    list: protectedProcedure
+      .input(z.object({ folderId: z.number().optional(), tagIds: z.array(z.number()).optional() }).optional())
+      .query(async ({ ctx, input }) => {
+        return await db.getKnowledgeFilesByUserId(ctx.user.id, input);
+      }),
 
     upload: protectedProcedure
       .input(z.object({
         fileName: z.string(),
         fileContent: z.string(), // Base64 encoded
         mimeType: z.string(),
+        folderId: z.number().optional(),
+        tagIds: z.array(z.number()).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         const buffer = Buffer.from(input.fileContent, 'base64');
@@ -73,6 +77,7 @@ export const appRouter = router({
         const result = await db.createKnowledgeFile({
           userId: ctx.user.id,
           fileName: input.fileName,
+          folderId: input.folderId,
           fileKey,
           fileUrl: url,
           fileSize: buffer.length,
@@ -81,6 +86,9 @@ export const appRouter = router({
         });
 
         const fileId = Number((result as any).insertId);
+        if (input.tagIds && input.tagIds.length > 0) {
+          await db.setKnowledgeFileTags(ctx.user.id, fileId, input.tagIds);
+        }
 
         // Async text extraction and chunking (non-blocking)
         (async () => {
@@ -143,12 +151,15 @@ export const appRouter = router({
         prompt: z.string(),
         parameters: z.record(z.string(), z.any()).optional(),
         knowledgeFileIds: z.array(z.number()).optional(),
+        folderId: z.number().optional(),
+        tagIds: z.array(z.number()).optional(),
       }))
       .mutation(async ({ ctx, input }) => {
         // Create initial record
         const result = await db.createGenerationHistory({
           userId: ctx.user.id,
           resourceType: input.resourceType,
+          folderId: input.folderId,
           title: input.title,
           prompt: input.prompt,
           parameters: input.parameters || {},
@@ -158,6 +169,9 @@ export const appRouter = router({
         });
 
         const historyId = Number((result as any).insertId);
+        if (input.tagIds && input.tagIds.length > 0) {
+          await db.setGenerationTags(ctx.user.id, historyId, input.tagIds);
+        }
 
         try {
           // Build context from knowledge files using RAG retrieval
@@ -223,6 +237,14 @@ export const appRouter = router({
             ...(retrievalSnapshot ? { retrievalContext: retrievalSnapshot } : {}),
           });
 
+          await db.createGenerationHistoryVersion({
+            generationId: historyId,
+            versionNo: 1,
+            contentSnapshot: content,
+            editedBy: ctx.user.id,
+            changeSummary: "初始生成",
+          });
+
           return { success: true, historyId, content };
         } catch (error) {
           await db.updateGenerationHistory(historyId, {
@@ -242,6 +264,8 @@ export const appRouter = router({
         search: z.string().optional(),
         resourceType: z.string().optional(),
         favoritesOnly: z.boolean().optional(),
+        folderId: z.number().optional(),
+        tagIds: z.array(z.number()).optional(),
       }))
       .query(async ({ ctx, input }) => {
         return await db.searchGenerationHistory(ctx.user.id, input);
@@ -258,12 +282,52 @@ export const appRouter = router({
         id: z.number(),
         title: z.string().optional(),
         content: z.string().optional(),
+        changeSummary: z.string().optional(),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
         await db.updateGenerationHistory(input.id, {
           title: input.title,
           content: input.content,
         });
+
+        if (typeof input.content === "string") {
+          const nextVersionNo = (await db.getLatestGenerationVersionNo(input.id)) + 1;
+          await db.createGenerationHistoryVersion({
+            generationId: input.id,
+            versionNo: nextVersionNo,
+            contentSnapshot: input.content,
+            editedBy: ctx.user.id,
+            changeSummary: input.changeSummary || "手动编辑",
+          });
+        }
+        return { success: true };
+      }),
+
+    listVersions: protectedProcedure
+      .input(z.object({ generationId: z.number() }))
+      .query(async ({ input }) => {
+        return db.getGenerationHistoryVersions(input.generationId);
+      }),
+
+    rollbackVersion: protectedProcedure
+      .input(z.object({ generationId: z.number(), versionNo: z.number() }))
+      .mutation(async ({ ctx, input }) => {
+        const versions = await db.getGenerationHistoryVersions(input.generationId);
+        const target = versions.find(v => v.versionNo === input.versionNo);
+        if (!target) {
+          throw new Error("版本不存在");
+        }
+
+        await db.updateGenerationHistory(input.generationId, { content: target.contentSnapshot });
+        const nextVersionNo = (await db.getLatestGenerationVersionNo(input.generationId)) + 1;
+        await db.createGenerationHistoryVersion({
+          generationId: input.generationId,
+          versionNo: nextVersionNo,
+          contentSnapshot: target.contentSnapshot,
+          editedBy: ctx.user.id,
+          changeSummary: `回滚到 V${input.versionNo}`,
+        });
+
         return { success: true };
       }),
 
@@ -383,6 +447,23 @@ export const appRouter = router({
       .input(z.object({ generationHistoryId: z.number() }))
       .query(async ({ ctx, input }) => {
         return await db.getGenerationExportTasksByHistoryId(input.generationHistoryId, ctx.user.id);
+      }),
+  }),
+
+  organization: router({
+    listFolders: protectedProcedure.query(async ({ ctx }) => db.getFoldersByUserId(ctx.user.id)),
+    createFolder: protectedProcedure
+      .input(z.object({ name: z.string().min(1), parentId: z.number().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.createFolder({ userId: ctx.user.id, name: input.name, parentId: input.parentId });
+        return { success: true };
+      }),
+    listTags: protectedProcedure.query(async ({ ctx }) => db.getResourceTagsByUserId(ctx.user.id)),
+    createTag: protectedProcedure
+      .input(z.object({ name: z.string().min(1), color: z.string().optional() }))
+      .mutation(async ({ ctx, input }) => {
+        await db.createResourceTag({ userId: ctx.user.id, name: input.name, color: input.color });
+        return { success: true };
       }),
   }),
 

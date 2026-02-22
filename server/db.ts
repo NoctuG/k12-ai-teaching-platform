@@ -21,7 +21,15 @@ import {
   studentCommentGenerations,
   InsertClass,
   InsertStudent,
-  InsertStudentCommentGeneration
+  InsertStudentCommentGeneration,
+  folders,
+  InsertFolder,
+  resourceTags,
+  InsertResourceTag,
+  knowledgeFileTags,
+  generationHistoryTags,
+  generationHistoryVersions,
+  InsertGenerationHistoryVersion,
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -123,11 +131,22 @@ export async function createKnowledgeFile(file: InsertKnowledgeFile) {
   return result;
 }
 
-export async function getKnowledgeFilesByUserId(userId: number) {
+export async function getKnowledgeFilesByUserId(userId: number, options?: { folderId?: number; tagIds?: number[] }) {
   const db = await getDb();
   if (!db) return [];
 
-  return await db.select().from(knowledgeFiles).where(eq(knowledgeFiles.userId, userId)).orderBy(desc(knowledgeFiles.createdAt));
+  const conditions = [eq(knowledgeFiles.userId, userId)];
+  if (options?.folderId !== undefined) {
+    conditions.push(eq(knowledgeFiles.folderId, options.folderId));
+  }
+  if (options?.tagIds && options.tagIds.length > 0) {
+    const tagFilter = db.select({ fileId: knowledgeFileTags.knowledgeFileId })
+      .from(knowledgeFileTags)
+      .where(and(eq(knowledgeFileTags.userId, userId), inArray(knowledgeFileTags.tagId, options.tagIds)));
+    conditions.push(inArray(knowledgeFiles.id, tagFilter));
+  }
+
+  return await db.select().from(knowledgeFiles).where(and(...conditions)).orderBy(desc(knowledgeFiles.createdAt));
 }
 
 export async function deleteKnowledgeFile(id: number, userId: number) {
@@ -185,6 +204,31 @@ export async function createGenerationHistory(history: InsertGenerationHistory) 
 
   const result = await db.insert(generationHistory).values(history);
   return result;
+}
+
+export async function createGenerationHistoryVersion(version: InsertGenerationHistoryVersion) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(generationHistoryVersions).values(version);
+}
+
+export async function getGenerationHistoryVersions(generationId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(generationHistoryVersions)
+    .where(eq(generationHistoryVersions.generationId, generationId))
+    .orderBy(desc(generationHistoryVersions.versionNo));
+}
+
+export async function getLatestGenerationVersionNo(generationId: number) {
+  const db = await getDb();
+  if (!db) return 0;
+  const versions = await db.select({ versionNo: generationHistoryVersions.versionNo })
+    .from(generationHistoryVersions)
+    .where(eq(generationHistoryVersions.generationId, generationId))
+    .orderBy(desc(generationHistoryVersions.versionNo))
+    .limit(1);
+  return versions[0]?.versionNo ?? 0;
 }
 
 export async function getGenerationHistoryByUserId(userId: number) {
@@ -384,6 +428,8 @@ export async function searchGenerationHistory(userId: number, options: {
   search?: string;
   resourceType?: string;
   favoritesOnly?: boolean;
+  folderId?: number;
+  tagIds?: number[];
 }) {
   const db = await getDb();
   if (!db) return [];
@@ -408,10 +454,63 @@ export async function searchGenerationHistory(userId: number, options: {
     );
   }
 
+  if (options.folderId !== undefined) {
+    conditions.push(eq(generationHistory.folderId, options.folderId));
+  }
+
+  if (options.tagIds && options.tagIds.length > 0) {
+    const generationFilter = db.select({ generationId: generationHistoryTags.generationId })
+      .from(generationHistoryTags)
+      .where(and(eq(generationHistoryTags.userId, userId), inArray(generationHistoryTags.tagId, options.tagIds)));
+    conditions.push(inArray(generationHistory.id, generationFilter));
+  }
+
   return await db.select()
     .from(generationHistory)
     .where(and(...conditions))
     .orderBy(desc(generationHistory.createdAt));
+}
+
+export async function getFoldersByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(folders).where(eq(folders.userId, userId)).orderBy(folders.name);
+}
+
+export async function createFolder(data: InsertFolder) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(folders).values(data);
+}
+
+export async function getResourceTagsByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(resourceTags).where(eq(resourceTags.userId, userId)).orderBy(resourceTags.name);
+}
+
+export async function createResourceTag(data: InsertResourceTag) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(resourceTags).values(data);
+}
+
+export async function setKnowledgeFileTags(userId: number, knowledgeFileId: number, tagIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(knowledgeFileTags).where(and(eq(knowledgeFileTags.userId, userId), eq(knowledgeFileTags.knowledgeFileId, knowledgeFileId)));
+  if (tagIds.length > 0) {
+    await db.insert(knowledgeFileTags).values(tagIds.map(tagId => ({ userId, knowledgeFileId, tagId })));
+  }
+}
+
+export async function setGenerationTags(userId: number, generationId: number, tagIds: number[]) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  await db.delete(generationHistoryTags).where(and(eq(generationHistoryTags.userId, userId), eq(generationHistoryTags.generationId, generationId)));
+  if (tagIds.length > 0) {
+    await db.insert(generationHistoryTags).values(tagIds.map(tagId => ({ userId, generationId, tagId })));
+  }
 }
 
 // Toggle Favorite
