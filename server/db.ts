@@ -14,7 +14,14 @@ import {
   resourceTemplates,
   InsertResourceTemplate,
   studentComments,
-  InsertStudentComment
+  InsertStudentComment,
+  classes,
+  students,
+  studentPerformanceRecords,
+  studentCommentGenerations,
+  InsertClass,
+  InsertStudent,
+  InsertStudentCommentGeneration
 } from "../drizzle/schema";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -316,6 +323,60 @@ export async function deleteStudentComment(id: number, userId: number) {
   if (!db) throw new Error("Database not available");
 
   await db.delete(studentComments).where(and(eq(studentComments.id, id), eq(studentComments.userId, userId)));
+}
+
+export async function getClassesByUserId(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(classes).where(eq(classes.userId, userId)).orderBy(desc(classes.updatedAt));
+}
+
+export async function createClass(data: InsertClass) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(classes).values(data);
+}
+
+export async function getStudentsByClassId(userId: number, classId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(students).where(and(eq(students.userId, userId), eq(students.classId, classId))).orderBy(students.name);
+}
+
+export async function createStudents(data: InsertStudent[]) {
+  if (data.length === 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(students).values(data);
+}
+
+export async function createStudentCommentGenerations(data: InsertStudentCommentGeneration[]) {
+  if (data.length === 0) return;
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return db.insert(studentCommentGenerations).values(data);
+}
+
+export async function getStructuredCommentHistory(userId: number, classId: number, term?: string) {
+  const db = await getDb();
+  if (!db) return [];
+  const conditions = [eq(studentCommentGenerations.userId, userId), eq(studentCommentGenerations.classId, classId)];
+  if (term) {
+    conditions.push(eq(studentCommentGenerations.term, term));
+  }
+  return db.select().from(studentCommentGenerations).where(and(...conditions)).orderBy(desc(studentCommentGenerations.generatedAt));
+}
+
+export async function getPerformanceTrend(userId: number, classId: number, studentId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(studentPerformanceRecords)
+    .where(and(
+      eq(studentPerformanceRecords.userId, userId),
+      eq(studentPerformanceRecords.classId, classId),
+      eq(studentPerformanceRecords.studentId, studentId),
+    ))
+    .orderBy(desc(studentPerformanceRecords.recordAt));
 }
 
 // Search & Filter Generation History

@@ -186,3 +186,77 @@ export const studentComments = mysqlTable("student_comments", {
 
 export type StudentComment = typeof studentComments.$inferSelect;
 export type InsertStudentComment = typeof studentComments.$inferInsert;
+
+/**
+ * Structured class roster owned by teacher(user).
+ */
+export const classes = mysqlTable("classes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  stage: varchar("stage", { length: 64 }).notNull(), // 学段
+  grade: varchar("grade", { length: 64 }).notNull(),
+  term: varchar("term", { length: 64 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Class = typeof classes.$inferSelect;
+export type InsertClass = typeof classes.$inferInsert;
+
+/**
+ * Structured student profile.
+ */
+export const students = mysqlTable("students", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classId: int("classId").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  studentNo: varchar("studentNo", { length: 64 }),
+  status: mysqlEnum("status", ["active", "inactive", "graduated"]).default("active").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Student = typeof students.$inferSelect;
+export type InsertStudent = typeof students.$inferInsert;
+
+/**
+ * Student learning/performance records for trend analysis.
+ */
+export const studentPerformanceRecords = mysqlTable("student_performance_records", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classId: int("classId").notNull(),
+  studentId: int("studentId").notNull(),
+  recordAt: timestamp("recordAt").defaultNow().notNull(),
+  dimension: varchar("dimension", { length: 128 }).notNull(),
+  indicator: varchar("indicator", { length: 128 }).notNull(),
+  teacherNote: text("teacherNote"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type StudentPerformanceRecord = typeof studentPerformanceRecords.$inferSelect;
+export type InsertStudentPerformanceRecord = typeof studentPerformanceRecords.$inferInsert;
+
+/**
+ * Structured generated comments (batch + student result rows).
+ */
+export const studentCommentGenerations = mysqlTable("student_comment_generations", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classId: int("classId").notNull(),
+  studentId: int("studentId").notNull(),
+  term: varchar("term", { length: 64 }).notNull(),
+  batchTitle: varchar("batchTitle", { length: 255 }).notNull(),
+  commentType: mysqlEnum("commentType", ["final_term", "homework", "daily", "custom"]).notNull(),
+  performance: text("performance"),
+  comment: text("comment").notNull(),
+  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
+  generatedAt: timestamp("generatedAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type StudentCommentGeneration = typeof studentCommentGenerations.$inferSelect;
+export type InsertStudentCommentGeneration = typeof studentCommentGenerations.$inferInsert;

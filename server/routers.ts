@@ -387,12 +387,57 @@ export const appRouter = router({
   }),
 
   comments: router({
+    createClass: protectedProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        stage: z.string().min(1),
+        grade: z.string().min(1),
+        term: z.string().min(1),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await db.createClass({ userId: ctx.user.id, ...input });
+        return { success: true, classId: Number((result as any).insertId) };
+      }),
+
+    listClasses: protectedProcedure.query(async ({ ctx }) => {
+      return await db.getClassesByUserId(ctx.user.id);
+    }),
+
+    listStudentsByClass: protectedProcedure
+      .input(z.object({ classId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        return await db.getStudentsByClassId(ctx.user.id, input.classId);
+      }),
+
+    upsertStudents: protectedProcedure
+      .input(z.object({
+        classId: z.number(),
+        students: z.array(z.object({
+          name: z.string().min(1),
+          studentNo: z.string().optional(),
+          status: z.enum(["active", "inactive", "graduated"]).default("active"),
+        })),
+      }))
+      .mutation(async ({ ctx, input }) => {
+        await db.createStudents(input.students.map((student) => ({
+          userId: ctx.user.id,
+          classId: input.classId,
+          name: student.name,
+          studentNo: student.studentNo,
+          status: student.status,
+        })));
+        return { success: true };
+      }),
+
     // 创建批量评语任务
     createBatch: protectedProcedure
       .input(z.object({
+        classId: z.number(),
+        term: z.string().min(1),
         batchTitle: z.string(),
         commentType: z.enum(["final_term", "homework", "daily", "custom"]),
         students: z.array(z.object({
+          studentId: z.number(),
           name: z.string(),
           performance: z.string(), // 学生表现描述
         })),
@@ -438,6 +483,18 @@ export const appRouter = router({
               students: studentsWithComments,
               status: "completed",
             });
+
+            await db.createStudentCommentGenerations(studentsWithComments.map((student, index) => ({
+              userId: ctx.user.id,
+              classId: input.classId,
+              studentId: input.students[index].studentId,
+              term: input.term,
+              batchTitle: input.batchTitle,
+              commentType: input.commentType,
+              performance: student.performance,
+              comment: student.comment,
+              status: "completed",
+            })));
           } catch (error) {
             await db.updateStudentComment(batchId, {
               status: "failed",
@@ -452,6 +509,18 @@ export const appRouter = router({
     list: protectedProcedure.query(async ({ ctx }) => {
       return await db.getStudentCommentsByUserId(ctx.user.id);
     }),
+
+    history: protectedProcedure
+      .input(z.object({ classId: z.number(), term: z.string().optional() }))
+      .query(async ({ ctx, input }) => {
+        return await db.getStructuredCommentHistory(ctx.user.id, input.classId, input.term);
+      }),
+
+    trend: protectedProcedure
+      .input(z.object({ classId: z.number(), studentId: z.number() }))
+      .query(async ({ ctx, input }) => {
+        return await db.getPerformanceTrend(ctx.user.id, input.classId, input.studentId);
+      }),
 
     // 获取单个评语批次
     getById: protectedProcedure
