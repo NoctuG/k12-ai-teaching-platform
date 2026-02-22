@@ -33,7 +33,13 @@ import {
   Minus,
   ChevronUp,
   ChevronDown,
+  Bold,
+  Italic,
+  Code2,
+  Link2,
+  Highlighter,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const blockTypeLabels: Record<BlockType, string> = {
   heading: "标题",
@@ -285,6 +291,101 @@ function BlockEditor({
     }
   }, []);
 
+  const updateContentWithSelection = useCallback(
+    (
+      nextContent: string,
+      selectionStart: number,
+      selectionEnd: number,
+    ) => {
+      onUpdate(block.id, { content: nextContent });
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(selectionStart, selectionEnd);
+        autoResize();
+      });
+    },
+    [autoResize, block.id, onUpdate]
+  );
+
+  const applyInlineFormat = useCallback(
+    (type: "bold" | "italic" | "code" | "link" | "highlight") => {
+      const el = textareaRef.current;
+      if (!el) return;
+
+      const content = block.content;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const selected = content.slice(start, end);
+      const hasSelection = start !== end;
+
+      let insertText = "";
+      let selectionStart = start;
+      let selectionEnd = end;
+
+      if (type === "link") {
+        const label = hasSelection ? selected : "链接文本";
+        const url = "https://";
+        insertText = `[${label}](${url})`;
+        selectionStart = start + label.length + 3;
+        selectionEnd = selectionStart + url.length;
+      } else {
+        const placeholder =
+          type === "bold"
+            ? "加粗文本"
+            : type === "italic"
+            ? "斜体文本"
+            : type === "code"
+            ? "代码"
+            : "高亮文本";
+        const target = hasSelection ? selected : placeholder;
+        const wrapper =
+          type === "bold"
+            ? "**"
+            : type === "italic"
+            ? "*"
+            : type === "code"
+            ? "`"
+            : "==";
+
+        insertText = `${wrapper}${target}${wrapper}`;
+        selectionStart = start + wrapper.length;
+        selectionEnd = selectionStart + target.length;
+      }
+
+      const nextContent = `${content.slice(0, start)}${insertText}${content.slice(end)}`;
+      updateContentWithSelection(nextContent, selectionStart, selectionEnd);
+    },
+    [block.content, updateContentWithSelection]
+  );
+
+  const handleEditorKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+
+      const key = e.key.toLowerCase();
+      if (key === "b") {
+        e.preventDefault();
+        applyInlineFormat("bold");
+      } else if (key === "i") {
+        e.preventDefault();
+        applyInlineFormat("italic");
+      } else if (key === "k") {
+        e.preventDefault();
+        applyInlineFormat("link");
+      } else if (key === "e") {
+        e.preventDefault();
+        applyInlineFormat("code");
+      } else if (key === "h") {
+        e.preventDefault();
+        applyInlineFormat("highlight");
+      }
+    },
+    [applyInlineFormat]
+  );
+
+
   useEffect(() => {
     autoResize();
   }, [block.content, autoResize]);
@@ -369,17 +470,69 @@ function BlockEditor({
           {isHr ? (
             <hr className="my-2 border-border" />
           ) : (
-            <textarea
-              ref={textareaRef}
-              value={block.content}
-              onChange={(e) => {
-                onUpdate(block.id, { content: e.target.value });
-                autoResize();
-              }}
-              className="w-full resize-none bg-transparent border-0 outline-none text-sm font-mono leading-relaxed placeholder:text-muted-foreground/50 min-h-[2rem]"
-              placeholder="在此输入内容..."
-              rows={1}
-            />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1 text-muted-foreground">
+                {[
+                  {
+                    type: "bold" as const,
+                    icon: <Bold className="w-3.5 h-3.5" />,
+                    title: "加粗",
+                    shortcut: "Ctrl/Cmd+B",
+                  },
+                  {
+                    type: "italic" as const,
+                    icon: <Italic className="w-3.5 h-3.5" />,
+                    title: "斜体",
+                    shortcut: "Ctrl/Cmd+I",
+                  },
+                  {
+                    type: "code" as const,
+                    icon: <Code2 className="w-3.5 h-3.5" />,
+                    title: "行内代码",
+                    shortcut: "Ctrl/Cmd+E",
+                  },
+                  {
+                    type: "link" as const,
+                    icon: <Link2 className="w-3.5 h-3.5" />,
+                    title: "链接",
+                    shortcut: "Ctrl/Cmd+K",
+                  },
+                  {
+                    type: "highlight" as const,
+                    icon: <Highlighter className="w-3.5 h-3.5" />,
+                    title: "高亮",
+                    shortcut: "Ctrl/Cmd+H",
+                  },
+                ].map((action) => (
+                  <Tooltip key={action.type}>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="p-1 rounded hover:bg-muted transition-colors"
+                        onClick={() => applyInlineFormat(action.type)}
+                      >
+                        {action.icon}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="text-xs">
+                      {action.title}（{action.shortcut}）
+                    </TooltipContent>
+                  </Tooltip>
+                ))}
+              </div>
+              <textarea
+                ref={textareaRef}
+                value={block.content}
+                onChange={(e) => {
+                  onUpdate(block.id, { content: e.target.value });
+                  autoResize();
+                }}
+                onKeyDown={handleEditorKeyDown}
+                className="w-full resize-none bg-transparent border-0 outline-none text-sm font-mono leading-relaxed placeholder:text-muted-foreground/50 min-h-[2rem]"
+                placeholder="在此输入内容..."
+                rows={1}
+              />
+            </div>
           )}
         </div>
       </div>
