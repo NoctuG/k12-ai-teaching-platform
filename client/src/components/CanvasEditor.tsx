@@ -39,7 +39,11 @@ import {
   Link2,
   Highlighter,
 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 const blockTypeLabels: Record<BlockType, string> = {
   heading: "标题",
@@ -65,9 +69,21 @@ interface CanvasEditorProps {
   content: string;
   onSave: (content: string) => void;
   saving?: boolean;
+  readOnly?: boolean;
+  onContentChange?: (content: string) => void;
+  onCursorChange?: (anchor: string) => void;
+  remotePresence?: Array<{ userId: number; cursorAnchor: string | null }>;
 }
 
-export default function CanvasEditor({ content, onSave, saving }: CanvasEditorProps) {
+export default function CanvasEditor({
+  content,
+  onSave,
+  saving,
+  readOnly,
+  onContentChange,
+  onCursorChange,
+  remotePresence,
+}: CanvasEditorProps) {
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdown(content));
   const [activeTab, setActiveTab] = useState<string>("edit");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -84,18 +100,16 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
   }, [blocks, onSave]);
 
   const updateBlock = useCallback((id: string, updates: Partial<Block>) => {
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, ...updates } : b))
-    );
+    setBlocks(prev => prev.map(b => (b.id === id ? { ...b, ...updates } : b)));
   }, []);
 
   const removeBlock = useCallback((id: string) => {
-    setBlocks((prev) => prev.filter((b) => b.id !== id));
+    setBlocks(prev => prev.filter(b => b.id !== id));
   }, []);
 
   const addBlockAfter = useCallback((afterId: string, type: BlockType) => {
-    setBlocks((prev) => {
-      const idx = prev.findIndex((b) => b.id === afterId);
+    setBlocks(prev => {
+      const idx = prev.findIndex(b => b.id === afterId);
       const newBlock = createEmptyBlock(type);
       const next = [...prev];
       next.splice(idx + 1, 0, newBlock);
@@ -104,11 +118,11 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
   }, []);
 
   const addBlockAtEnd = useCallback((type: BlockType) => {
-    setBlocks((prev) => [...prev, createEmptyBlock(type)]);
+    setBlocks(prev => [...prev, createEmptyBlock(type)]);
   }, []);
 
   const moveBlock = useCallback((fromIdx: number, toIdx: number) => {
-    setBlocks((prev) => {
+    setBlocks(prev => {
       const next = [...prev];
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
@@ -116,13 +130,16 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
     });
   }, []);
 
-  const moveBlockUp = useCallback((idx: number) => {
-    if (idx <= 0) return;
-    moveBlock(idx, idx - 1);
-  }, [moveBlock]);
+  const moveBlockUp = useCallback(
+    (idx: number) => {
+      if (idx <= 0) return;
+      moveBlock(idx, idx - 1);
+    },
+    [moveBlock]
+  );
 
   const moveBlockDown = useCallback((idx: number) => {
-    setBlocks((prev) => {
+    setBlocks(prev => {
       if (idx >= prev.length - 1) return prev;
       const next = [...prev];
       const [moved] = next.splice(idx, 1);
@@ -177,6 +194,10 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
 
   const previewMarkdown = serializeBlocks(blocks);
 
+  useEffect(() => {
+    onContentChange?.(previewMarkdown);
+  }, [onContentChange, previewMarkdown]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
@@ -197,10 +218,15 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
           <Badge variant="outline" className="text-xs font-normal">
             {blocks.length} 个内容块
           </Badge>
+          {!!remotePresence?.length && (
+            <Badge variant="secondary" className="text-xs font-normal">
+              在线光标 {remotePresence.length}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <AddBlockMenu onAdd={addBlockAtEnd} label="添加块" />
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button size="sm" onClick={handleSave} disabled={saving || readOnly}>
             <Save className="w-4 h-4 mr-1.5" />
             {saving ? "保存中..." : "保存"}
           </Button>
@@ -219,12 +245,12 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
           {blocks.map((block, idx) => (
             <div
               key={block.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, idx)}
+              draggable={!readOnly}
+              onDragStart={e => handleDragStart(e, idx)}
               onDragEnter={() => handleDragEnter(idx)}
               onDragLeave={handleDragLeave}
               onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, idx)}
+              onDrop={e => handleDrop(e, idx)}
               onDragEnd={handleDragEnd}
               className={`transition-all ${
                 dragIndex === idx ? "opacity-40" : ""
@@ -243,6 +269,8 @@ export default function CanvasEditor({ content, onSave, saving }: CanvasEditorPr
                 onAddAfter={addBlockAfter}
                 onMoveUp={moveBlockUp}
                 onMoveDown={moveBlockDown}
+                onFocusBlock={onCursorChange}
+                readOnly={!!readOnly}
               />
             </div>
           ))}
@@ -269,6 +297,8 @@ interface BlockEditorProps {
   onAddAfter: (afterId: string, type: BlockType) => void;
   onMoveUp: (idx: number) => void;
   onMoveDown: (idx: number) => void;
+  onFocusBlock?: (anchor: string) => void;
+  readOnly: boolean;
 }
 
 function BlockEditor({
@@ -280,6 +310,8 @@ function BlockEditor({
   onAddAfter,
   onMoveUp,
   onMoveDown,
+  onFocusBlock,
+  readOnly,
 }: BlockEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -292,11 +324,7 @@ function BlockEditor({
   }, []);
 
   const updateContentWithSelection = useCallback(
-    (
-      nextContent: string,
-      selectionStart: number,
-      selectionEnd: number,
-    ) => {
+    (nextContent: string, selectionStart: number, selectionEnd: number) => {
       onUpdate(block.id, { content: nextContent });
       requestAnimationFrame(() => {
         const el = textareaRef.current;
@@ -335,19 +363,19 @@ function BlockEditor({
           type === "bold"
             ? "加粗文本"
             : type === "italic"
-            ? "斜体文本"
-            : type === "code"
-            ? "代码"
-            : "高亮文本";
+              ? "斜体文本"
+              : type === "code"
+                ? "代码"
+                : "高亮文本";
         const target = hasSelection ? selected : placeholder;
         const wrapper =
           type === "bold"
             ? "**"
             : type === "italic"
-            ? "*"
-            : type === "code"
-            ? "`"
-            : "==";
+              ? "*"
+              : type === "code"
+                ? "`"
+                : "==";
 
         insertText = `${wrapper}${target}${wrapper}`;
         selectionStart = start + wrapper.length;
@@ -385,7 +413,6 @@ function BlockEditor({
     [applyInlineFormat]
   );
 
-
   useEffect(() => {
     autoResize();
   }, [block.content, autoResize]);
@@ -399,7 +426,7 @@ function BlockEditor({
         <div className="flex flex-col items-center gap-0.5 py-2 pl-1 pr-0 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
           <button
             className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-muted text-muted-foreground"
-            onMouseDown={(e) => e.stopPropagation()}
+            onMouseDown={e => e.stopPropagation()}
             title="拖拽排序"
           >
             <GripVertical className="w-4 h-4" />
@@ -407,7 +434,7 @@ function BlockEditor({
           <button
             className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-30"
             onClick={() => onMoveUp(index)}
-            disabled={index === 0}
+            disabled={readOnly || index === 0}
             title="上移"
           >
             <ChevronUp className="w-3.5 h-3.5" />
@@ -415,7 +442,7 @@ function BlockEditor({
           <button
             className="p-1 rounded hover:bg-muted text-muted-foreground disabled:opacity-30"
             onClick={() => onMoveDown(index)}
-            disabled={index === total - 1}
+            disabled={readOnly || index === total - 1}
             title="下移"
           >
             <ChevronDown className="w-3.5 h-3.5" />
@@ -426,7 +453,10 @@ function BlockEditor({
         <div className="flex-1 min-w-0 py-2 pr-2">
           {/* Block type badge */}
           <div className="flex items-center gap-2 mb-1.5">
-            <Badge variant="secondary" className="text-[10px] font-normal gap-1 px-1.5 py-0">
+            <Badge
+              variant="secondary"
+              className="text-[10px] font-normal gap-1 px-1.5 py-0"
+            >
               {blockTypeIcons[block.type]}
               {blockTypeLabels[block.type]}
               {block.type === "heading" && block.level && ` H${block.level}`}
@@ -434,7 +464,7 @@ function BlockEditor({
 
             {block.type === "heading" && (
               <div className="flex gap-0.5">
-                {[1, 2, 3, 4, 5, 6].map((lvl) => (
+                {[1, 2, 3, 4, 5, 6].map(lvl => (
                   <button
                     key={lvl}
                     className={`text-[10px] w-5 h-5 rounded flex items-center justify-center transition-colors ${
@@ -443,6 +473,7 @@ function BlockEditor({
                         : "hover:bg-muted text-muted-foreground"
                     }`}
                     onClick={() => onUpdate(block.id, { level: lvl })}
+                    disabled={readOnly}
                   >
                     {lvl}
                   </button>
@@ -452,13 +483,14 @@ function BlockEditor({
 
             <div className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               <AddBlockMenu
-                onAdd={(type) => onAddAfter(block.id, type)}
+                onAdd={type => onAddAfter(block.id, type)}
                 label=""
                 compact
               />
               <button
                 className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                 onClick={() => onRemove(block.id)}
+                disabled={readOnly}
                 title="删除此块"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -503,13 +535,14 @@ function BlockEditor({
                     title: "高亮",
                     shortcut: "Ctrl/Cmd+H",
                   },
-                ].map((action) => (
+                ].map(action => (
                   <Tooltip key={action.type}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         className="p-1 rounded hover:bg-muted transition-colors"
                         onClick={() => applyInlineFormat(action.type)}
+                        disabled={readOnly}
                       >
                         {action.icon}
                       </button>
@@ -523,7 +556,10 @@ function BlockEditor({
               <textarea
                 ref={textareaRef}
                 value={block.content}
-                onChange={(e) => {
+                readOnly={readOnly}
+                onFocus={() => onFocusBlock?.(block.id)}
+                onChange={e => {
+                  if (readOnly) return;
                   onUpdate(block.id, { content: e.target.value });
                   autoResize();
                 }}
@@ -579,7 +615,7 @@ function AddBlockMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {blockTypes.map((type) => (
+        {blockTypes.map(type => (
           <DropdownMenuItem key={type} onClick={() => onAdd(type)}>
             <span className="mr-2">{blockTypeIcons[type]}</span>
             {blockTypeLabels[type]}

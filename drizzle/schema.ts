@@ -1,4 +1,12 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, json } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  json,
+} from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -40,7 +48,14 @@ export const knowledgeFiles = mysqlTable("knowledge_files", {
   description: text("description"), // Optional description
   textContent: text("textContent"), // Full extracted text content
   chunkCount: int("chunkCount").default(0).notNull(), // Number of chunks created
-  processingStatus: mysqlEnum("processingStatus", ["pending", "processing", "completed", "failed"]).default("pending").notNull(),
+  processingStatus: mysqlEnum("processingStatus", [
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+  ])
+    .default("pending")
+    .notNull(),
   processingError: text("processingError"), // Error message if processing failed
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -110,7 +125,9 @@ export const generationHistory = mysqlTable("generation_history", {
   content: text("content").notNull(), // Generated content
   knowledgeFileIds: json("knowledgeFileIds"), // Array of knowledge file IDs used
   retrievalContext: text("retrievalContext"), // Snapshot of RAG-retrieved chunks used in generation
-  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"])
+    .default("pending")
+    .notNull(),
   errorMessage: text("errorMessage"), // Error message if failed
   isFavorite: int("isFavorite").default(0).notNull(), // 1 = favorite, 0 = not
   isShared: int("isShared").default(0).notNull(), // 1 = shared, 0 = private
@@ -121,6 +138,48 @@ export const generationHistory = mysqlTable("generation_history", {
 
 export type GenerationHistory = typeof generationHistory.$inferSelect;
 export type InsertGenerationHistory = typeof generationHistory.$inferInsert;
+
+export const collaborationPermissionEnum = mysqlEnum("permission", [
+  "edit",
+  "comment",
+  "read",
+]);
+export const commentStatusEnum = mysqlEnum("status", ["open", "resolved"]);
+
+export const collaborationSessions = mysqlTable("collaboration_sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  generationId: int("generationId").notNull(),
+  ownerId: int("ownerId").notNull(),
+  participants: json("participants").notNull(), // [{ userId, permission }]
+  docContent: text("docContent").notNull(),
+  revision: int("revision").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const resourceComments = mysqlTable("resource_comments", {
+  id: int("id").autoincrement().primaryKey(),
+  generationId: int("generationId").notNull(),
+  anchor: varchar("anchor", { length: 255 }).notNull(), // blockId or text range
+  content: text("content").notNull(),
+  authorId: int("authorId").notNull(),
+  parentId: int("parentId"), // threaded reply
+  status: commentStatusEnum.default("open").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const resourcePresence = mysqlTable("resource_presence", {
+  id: int("id").autoincrement().primaryKey(),
+  generationId: int("generationId").notNull(),
+  userId: int("userId").notNull(),
+  state: mysqlEnum("state", ["online", "idle", "offline"])
+    .default("online")
+    .notNull(),
+  cursorAnchor: varchar("cursorAnchor", { length: 255 }),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 /**
  * User-scoped folder tree for organizing knowledge and generated resources.
@@ -170,22 +229,31 @@ export const generationHistoryTags = mysqlTable("generation_history_tags", {
 /**
  * Immutable version snapshots for generated content edits and rollback auditing.
  */
-export const generationHistoryVersions = mysqlTable("generation_history_versions", {
-  id: int("id").autoincrement().primaryKey(),
-  generationId: int("generationId").notNull(),
-  versionNo: int("versionNo").notNull(),
-  contentSnapshot: text("contentSnapshot").notNull(),
-  contentDiff: text("contentDiff"), // Optional unified diff
-  editedBy: int("editedBy").notNull(),
-  changeSummary: text("changeSummary"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const generationHistoryVersions = mysqlTable(
+  "generation_history_versions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    generationId: int("generationId").notNull(),
+    versionNo: int("versionNo").notNull(),
+    contentSnapshot: text("contentSnapshot").notNull(),
+    contentDiff: text("contentDiff"), // Optional unified diff
+    editedBy: int("editedBy").notNull(),
+    changeSummary: text("changeSummary"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  }
+);
 
-export type GenerationHistoryVersion = typeof generationHistoryVersions.$inferSelect;
-export type InsertGenerationHistoryVersion = typeof generationHistoryVersions.$inferInsert;
+export type GenerationHistoryVersion =
+  typeof generationHistoryVersions.$inferSelect;
+export type InsertGenerationHistoryVersion =
+  typeof generationHistoryVersions.$inferInsert;
 
 export const exportTypeEnum = mysqlEnum("exportType", ["pptx", "docx", "pdf"]);
-export const exportStatusEnum = mysqlEnum("exportStatus", ["processing", "completed", "failed"]);
+export const exportStatusEnum = mysqlEnum("exportStatus", [
+  "processing",
+  "completed",
+  "failed",
+]);
 
 /**
  * Export task records for generated resources.
@@ -240,10 +308,17 @@ export const studentComments = mysqlTable("student_comments", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   batchTitle: varchar("batchTitle", { length: 255 }).notNull(), // 批次标题（例如：2024年春季期末评语）
-  commentType: mysqlEnum("commentType", ["final_term", "homework", "daily", "custom"]).notNull(), // 评语类型
+  commentType: mysqlEnum("commentType", [
+    "final_term",
+    "homework",
+    "daily",
+    "custom",
+  ]).notNull(), // 评语类型
   students: json("students").notNull(), // 学生信息数组 [{name, performance, comment}]
   totalCount: int("totalCount").notNull(), // 学生总数
-  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"])
+    .default("pending")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -277,7 +352,9 @@ export const students = mysqlTable("students", {
   classId: int("classId").notNull(),
   name: varchar("name", { length: 128 }).notNull(),
   studentNo: varchar("studentNo", { length: 64 }),
-  status: mysqlEnum("status", ["active", "inactive", "graduated"]).default("active").notNull(),
+  status: mysqlEnum("status", ["active", "inactive", "graduated"])
+    .default("active")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -288,39 +365,61 @@ export type InsertStudent = typeof students.$inferInsert;
 /**
  * Student learning/performance records for trend analysis.
  */
-export const studentPerformanceRecords = mysqlTable("student_performance_records", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  classId: int("classId").notNull(),
-  studentId: int("studentId").notNull(),
-  recordAt: timestamp("recordAt").defaultNow().notNull(),
-  dimension: varchar("dimension", { length: 128 }).notNull(),
-  indicator: varchar("indicator", { length: 128 }).notNull(),
-  teacherNote: text("teacherNote"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+export const studentPerformanceRecords = mysqlTable(
+  "student_performance_records",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    classId: int("classId").notNull(),
+    studentId: int("studentId").notNull(),
+    recordAt: timestamp("recordAt").defaultNow().notNull(),
+    dimension: varchar("dimension", { length: 128 }).notNull(),
+    indicator: varchar("indicator", { length: 128 }).notNull(),
+    teacherNote: text("teacherNote"),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+  }
+);
 
-export type StudentPerformanceRecord = typeof studentPerformanceRecords.$inferSelect;
-export type InsertStudentPerformanceRecord = typeof studentPerformanceRecords.$inferInsert;
+export type StudentPerformanceRecord =
+  typeof studentPerformanceRecords.$inferSelect;
+export type InsertStudentPerformanceRecord =
+  typeof studentPerformanceRecords.$inferInsert;
 
 /**
  * Structured generated comments (batch + student result rows).
  */
-export const studentCommentGenerations = mysqlTable("student_comment_generations", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull(),
-  classId: int("classId").notNull(),
-  studentId: int("studentId").notNull(),
-  term: varchar("term", { length: 64 }).notNull(),
-  batchTitle: varchar("batchTitle", { length: 255 }).notNull(),
-  commentType: mysqlEnum("commentType", ["final_term", "homework", "daily", "custom"]).notNull(),
-  performance: text("performance"),
-  comment: text("comment").notNull(),
-  status: mysqlEnum("status", ["pending", "generating", "completed", "failed"]).default("pending").notNull(),
-  generatedAt: timestamp("generatedAt").defaultNow().notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+export const studentCommentGenerations = mysqlTable(
+  "student_comment_generations",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("userId").notNull(),
+    classId: int("classId").notNull(),
+    studentId: int("studentId").notNull(),
+    term: varchar("term", { length: 64 }).notNull(),
+    batchTitle: varchar("batchTitle", { length: 255 }).notNull(),
+    commentType: mysqlEnum("commentType", [
+      "final_term",
+      "homework",
+      "daily",
+      "custom",
+    ]).notNull(),
+    performance: text("performance"),
+    comment: text("comment").notNull(),
+    status: mysqlEnum("status", [
+      "pending",
+      "generating",
+      "completed",
+      "failed",
+    ])
+      .default("pending")
+      .notNull(),
+    generatedAt: timestamp("generatedAt").defaultNow().notNull(),
+    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  }
+);
 
-export type StudentCommentGeneration = typeof studentCommentGenerations.$inferSelect;
-export type InsertStudentCommentGeneration = typeof studentCommentGenerations.$inferInsert;
+export type StudentCommentGeneration =
+  typeof studentCommentGenerations.$inferSelect;
+export type InsertStudentCommentGeneration =
+  typeof studentCommentGenerations.$inferInsert;
