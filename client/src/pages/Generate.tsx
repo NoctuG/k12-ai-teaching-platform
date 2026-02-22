@@ -11,6 +11,42 @@ import { toast } from "sonner";
 import { Loader2, Sparkles, CheckCircle2, Clock, Download, RefreshCcw } from "lucide-react";
 import { Streamdown } from "streamdown";
 
+type AdvancedParameters = {
+  teachingModel?: "5E" | "BOPPPS";
+  bloomLevel?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
+  difficulty?: "基础" | "中等" | "挑战";
+  lessonHours?: string;
+  classSize?: string;
+};
+
+type MindMapNode = {
+  id: string;
+  label: string;
+  level?: number;
+};
+
+type MindMapEdge = {
+  source: string;
+  target: string;
+  relation?: string;
+};
+
+type MindMapPayload = {
+  type: "mind_map";
+  title?: string;
+  nodes: MindMapNode[];
+  edges: MindMapEdge[];
+};
+
+type InteractiveGamePayload = {
+  type: "interactive_game";
+  title?: string;
+  flow?: string[];
+  rules?: string[];
+  materials?: string[];
+  scoring?: string[];
+};
+
 const resourceTypeGroups = [
   {
     label: "教学基础",
@@ -70,6 +106,11 @@ export default function Generate() {
   const [prompt, setPrompt] = useState("");
   const [generatedContent, setGeneratedContent] = useState("");
   const [alignCurriculumStandards, setAlignCurriculumStandards] = useState(false);
+  const [advancedParameters, setAdvancedParameters] = useState<AdvancedParameters>({
+    teachingModel: "5E",
+    bloomLevel: "understand",
+    difficulty: "中等",
+  });
 
   const { data: knowledgeFiles } = trpc.knowledge.list.useQuery();
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
@@ -118,6 +159,33 @@ export default function Generate() {
     },
   });
 
+  const supportsAdvancedParameters = useMemo(() => {
+    return ["courseware", "lesson_plan", "lesson_plan_unit", "interactive_game", "mind_map", "homework", "question_design"].includes(resourceType);
+  }, [resourceType]);
+
+  const parsedMindMap = useMemo(() => {
+    if (resourceType !== "mind_map" || !generatedContent) return null;
+    try {
+      const data = JSON.parse(generatedContent) as MindMapPayload;
+      if (data?.type !== "mind_map" || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) return null;
+      if (data.nodes.length === 0) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }, [resourceType, generatedContent]);
+
+  const parsedInteractiveGame = useMemo(() => {
+    if (resourceType !== "interactive_game" || !generatedContent) return null;
+    try {
+      const data = JSON.parse(generatedContent) as InteractiveGamePayload;
+      if (data?.type !== "interactive_game") return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }, [resourceType, generatedContent]);
+
   const handleGenerate = () => {
     if (!title.trim()) {
       toast.error("请输入标题");
@@ -128,11 +196,18 @@ export default function Generate() {
       return;
     }
 
+    const compactAdvancedParameters = Object.fromEntries(
+      Object.entries(advancedParameters).filter(([, value]) => value !== undefined && value !== "")
+    );
+
     generateMutation.mutate({
       resourceType: resourceType as any,
       title,
       prompt,
-      parameters: alignCurriculumStandards ? { alignCurriculumStandards: true } : undefined,
+      parameters: {
+        ...(alignCurriculumStandards ? { alignCurriculumStandards: true } : {}),
+        ...(supportsAdvancedParameters ? compactAdvancedParameters : {}),
+      },
       knowledgeFileIds: selectedFiles,
     });
   };
@@ -233,6 +308,88 @@ export default function Generate() {
                 </span>
               </div>
 
+              {supportsAdvancedParameters && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <div>
+                    <h3 className="font-semibold">高级参数</h3>
+                    <p className="text-xs text-muted-foreground">这些参数会结构化写入 parameters，并在后端提示词中显式注入。</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>教学法模型</Label>
+                      <Select
+                        value={advancedParameters.teachingModel}
+                        onValueChange={(value: "5E" | "BOPPPS") => setAdvancedParameters((prev) => ({ ...prev, teachingModel: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="5E">5E</SelectItem>
+                          <SelectItem value="BOPPPS">BOPPPS</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>布鲁姆层级</Label>
+                      <Select
+                        value={advancedParameters.bloomLevel}
+                        onValueChange={(value) => setAdvancedParameters((prev) => ({ ...prev, bloomLevel: value as AdvancedParameters["bloomLevel"] }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="remember">记忆</SelectItem>
+                          <SelectItem value="understand">理解</SelectItem>
+                          <SelectItem value="apply">应用</SelectItem>
+                          <SelectItem value="analyze">分析</SelectItem>
+                          <SelectItem value="evaluate">评价</SelectItem>
+                          <SelectItem value="create">创造</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>难度</Label>
+                      <Select
+                        value={advancedParameters.difficulty}
+                        onValueChange={(value) => setAdvancedParameters((prev) => ({ ...prev, difficulty: value as AdvancedParameters["difficulty"] }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="基础">基础</SelectItem>
+                          <SelectItem value="中等">中等</SelectItem>
+                          <SelectItem value="挑战">挑战</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>课时</Label>
+                      <Input
+                        placeholder="如 2"
+                        value={advancedParameters.lessonHours ?? ""}
+                        onChange={(e) => setAdvancedParameters((prev) => ({ ...prev, lessonHours: e.target.value }))}
+                      />
+                    </div>
+
+                    <div className="space-y-2 col-span-2">
+                      <Label>班级规模</Label>
+                      <Input
+                        placeholder="如 40"
+                        value={advancedParameters.classSize ?? ""}
+                        onChange={(e) => setAdvancedParameters((prev) => ({ ...prev, classSize: e.target.value }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {knowledgeFiles && knowledgeFiles.length > 0 && (
                 <div className="space-y-2">
                   <Label>参考资料（可选）</Label>
@@ -320,7 +477,54 @@ export default function Generate() {
                 </div>
               ) : generatedContent ? (
                 <div className="prose prose-sm max-w-none">
-                  <Streamdown>{generatedContent}</Streamdown>
+                  {resourceType === "mind_map" && parsedMindMap ? (
+                    <div className="space-y-4 not-prose">
+                      <div className="text-sm font-semibold">思维导图可视化（结构化 JSON）</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {parsedMindMap.nodes.map((node) => (
+                          <div key={node.id} className="border rounded-lg p-3 bg-muted/30">
+                            <div className="text-xs text-muted-foreground">节点 {node.id}</div>
+                            <div className="font-medium">{node.label}</div>
+                            {typeof node.level === "number" && <div className="text-xs mt-1">层级：{node.level}</div>}
+                          </div>
+                        ))}
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium mb-2">关系连线</div>
+                        <ul className="space-y-1 text-sm">
+                          {parsedMindMap.edges.map((edge, index) => (
+                            <li key={`${edge.source}-${edge.target}-${index}`}>
+                              {edge.source} → {edge.target}{edge.relation ? `（${edge.relation}）` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  ) : resourceType === "interactive_game" && parsedInteractiveGame ? (
+                    <div className="not-prose space-y-4">
+                      <div className="text-sm font-semibold">互动游戏结构化卡片</div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-2">流程</h4>
+                          <ul className="list-disc pl-5 text-sm space-y-1">{(parsedInteractiveGame.flow || []).map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+                        </div>
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-2">规则</h4>
+                          <ul className="list-disc pl-5 text-sm space-y-1">{(parsedInteractiveGame.rules || []).map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+                        </div>
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-2">材料</h4>
+                          <ul className="list-disc pl-5 text-sm space-y-1">{(parsedInteractiveGame.materials || []).map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+                        </div>
+                        <div className="border rounded-lg p-4">
+                          <h4 className="font-semibold mb-2">评分</h4>
+                          <ul className="list-disc pl-5 text-sm space-y-1">{(parsedInteractiveGame.scoring || []).map((item, idx) => <li key={idx}>{item}</li>)}</ul>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <Streamdown>{generatedContent}</Streamdown>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-12 text-muted-foreground font-light">

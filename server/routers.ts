@@ -215,6 +215,14 @@ export const appRouter = router({
             systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
           }
 
+          const structuredParameterLines = Object.entries(input.parameters || {})
+            .filter(([key, value]) => value !== undefined && value !== null && value !== "")
+            .map(([key, value]) => `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`);
+
+          if (structuredParameterLines.length > 0) {
+            systemPrompt += `\n\n【结构化参数约束（必须显式执行）】\n${structuredParameterLines.join("\n")}\n请将以上参数作为硬约束写入生成内容，不得忽略。`;
+          }
+
           // Generate content using LLM with RAG context
           const userMessage = knowledgeContext
             ? `${knowledgeContext}\n\n---\n\n${input.prompt}`
@@ -913,7 +921,18 @@ function getSystemPromptForResourceType(resourceType: string): string {
 - 寓教于乐，知识点覆盖明确
 - 全员参与，避免旁观者效应
 - 时间控制在5-15分钟
-- 可适应线上/线下不同场景`,
+- 可适应线上/线下不同场景
+
+输出协议（必须遵守）：
+请返回 JSON（不要 Markdown 代码块，不要附加解释），结构如下：
+{
+  "type": "interactive_game",
+  "title": "游戏名称",
+  "flow": ["步骤1", "步骤2"],
+  "rules": ["规则1", "规则2"],
+  "materials": ["材料1", "材料2"],
+  "scoring": ["评分规则1", "评分规则2"]
+}`,
 
     discussion_chain: `你是一位擅长苏格拉底式教学的K12教育专家，精于设计层层递进的讨论话题和问题链。请根据用户的要求生成完整的讨论话题/问题链设计，包括：
 1. 主题概述和讨论目标
@@ -941,14 +960,30 @@ function getSystemPromptForResourceType(resourceType: string): string {
 6. 重点标注和颜色建议
 7. 记忆口诀或助记方法
 
-请用层级缩进的Markdown格式输出，方便转化为思维导图工具可读取的格式。
-
 要求：
 - 结构清晰，层次分明
 - 关键词精炼（每个节点不超过8个字）
 - 覆盖核心知识点
 - 体现知识间的逻辑关系
-- 适合学生复习和记忆使用`,
+- 适合学生复习和记忆使用
+
+输出协议（必须遵守）：
+请返回 JSON（不要 Markdown 代码块，不要附加解释），结构如下：
+{
+  "type": "mind_map",
+  "title": "主题",
+  "nodes": [
+    { "id": "root", "label": "中心主题", "level": 0 },
+    { "id": "n1", "label": "一级分支A", "level": 1 }
+  ],
+  "edges": [
+    { "source": "root", "target": "n1", "relation": "包含" }
+  ]
+}
+
+规则：
+- id 必须唯一，使用简洁字符串。
+- edges 中 source/target 必须引用已存在节点。`,
 
     // ===== 家校沟通类 =====
     parent_letter: `你是一位善于家校沟通的K12班主任，擅长撰写温暖专业的家长通知和家长信。请根据用户的要求生成完整的家长通知/家长信，包括：
