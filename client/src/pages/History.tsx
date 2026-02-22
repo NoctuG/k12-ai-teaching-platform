@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine, Star, Share2, Search, Filter, Gamepad2, GitBranch, Brain, Mail, Users, Lightbulb, GraduationCap, Trophy, CalendarRange, BookOpen, RefreshCcw } from "lucide-react";
+import { FileText, ClipboardList, BookText, Mic, MessageSquare, Trash2, Eye, Loader2, Download, PenLine, Star, Share2, Search, Filter, Gamepad2, GitBranch, Brain, Mail, Users, Lightbulb, GraduationCap, Trophy, CalendarRange, BookOpen, RefreshCcw, FolderTree, Tag, History as HistoryIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useState } from "react";
@@ -78,11 +78,18 @@ export default function History() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [activeFolderId, setActiveFolderId] = useState<number | undefined>();
+  const [activeTagIds, setActiveTagIds] = useState<number[]>([]);
+
+  const { data: folders = [] } = trpc.organization.listFolders.useQuery();
+  const { data: tags = [] } = trpc.organization.listTags.useQuery();
 
   const { data: history, isLoading, refetch } = trpc.generation.search.useQuery({
     search: searchQuery || undefined,
     resourceType: filterType !== "all" ? filterType : undefined,
     favoritesOnly: favoritesOnly || undefined,
+    folderId: activeFolderId,
+    tagIds: activeTagIds,
   });
 
   const [, setLocation] = useLocation();
@@ -92,6 +99,19 @@ export default function History() {
     { enabled: !!selectedItem }
   );
 
+
+  const { data: versions = [], refetch: refetchVersions } = trpc.generation.listVersions.useQuery(
+    { generationId: selectedItem! },
+    { enabled: !!selectedItem }
+  );
+  const rollbackMutation = trpc.generation.rollbackVersion.useMutation({
+    onSuccess: () => {
+      toast.success("已回滚并写入新版本");
+      refetch();
+      refetchVersions();
+    },
+    onError: (error) => toast.error("回滚失败：" + error.message),
+  });
   const [exportProgress, setExportProgress] = useState(0);
   const [retryPayload, setRetryPayload] = useState<{ generationHistoryId: number; format: "pptx" | "docx" | "pdf" } | null>(null);
   const { data: exportRecords, refetch: refetchExports } = trpc.generation.listExports.useQuery(
@@ -175,7 +195,22 @@ export default function History() {
         </div>
 
         {/* Search and Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="grid gap-3 lg:grid-cols-[260px_1fr]">
+          <Card>
+            <CardHeader><CardTitle className="text-base flex items-center gap-2"><FolderTree className="w-4 h-4" />目录与标签</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              <Button size="sm" className="w-full justify-start" variant={activeFolderId === undefined ? "default" : "outline"} onClick={() => setActiveFolderId(undefined)}>全部目录</Button>
+              {folders.map((folder: any) => <Button key={folder.id} size="sm" variant={activeFolderId === folder.id ? "default" : "ghost"} className="w-full justify-start" onClick={() => setActiveFolderId(folder.id)}>{folder.name}</Button>)}
+              <div className="pt-2 border-t">
+                <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1"><Tag className="w-3 h-3" />标签筛选</p>
+                <div className="flex flex-wrap gap-2">
+                  {tags.map((tag: any) => <Badge key={tag.id} variant={activeTagIds.includes(tag.id) ? "default" : "outline"} className="cursor-pointer" onClick={() => setActiveTagIds((prev) => prev.includes(tag.id) ? prev.filter(id => id !== tag.id) : [...prev, tag.id])}>{tag.name}</Badge>)}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
@@ -207,6 +242,8 @@ export default function History() {
           </Button>
         </div>
 
+        </div>
+
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -214,7 +251,7 @@ export default function History() {
         ) : !history || history.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-muted-foreground font-light">
-              {searchQuery || filterType !== "all" || favoritesOnly ? "未找到匹配的记录" : "暂无生成记录"}
+              {searchQuery || filterType !== "all" || favoritesOnly || activeFolderId !== undefined || activeTagIds.length > 0 ? "未找到匹配的记录" : "暂无生成记录"}
             </CardContent>
           </Card>
         ) : (
@@ -377,11 +414,25 @@ export default function History() {
                   <RefreshCcw className="w-4 h-4 mr-1" />重试上次导出
                 </Button>
               )}
-              <div className="text-xs text-muted-foreground space-y-1">
-                <div>导出记录</div>
-                {(exportRecords || []).slice(0, 5).map((record: any) => (
-                  <div key={record.id}>[{record.exportType.toUpperCase()}] {record.status} {record.fileName || ""}</div>
-                ))}
+              <div className="grid gap-4 md:grid-cols-[1fr_260px]">
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>导出记录</div>
+                  {(exportRecords || []).slice(0, 5).map((record: any) => (
+                    <div key={record.id}>[{record.exportType.toUpperCase()}] {record.status} {record.fileName || ""}</div>
+                  ))}
+                </div>
+                <div className="border rounded-md p-3 space-y-2">
+                  <p className="text-sm font-medium flex items-center gap-1"><HistoryIcon className="w-4 h-4" />版本时间线</p>
+                  {versions.map((version: any) => (
+                    <div key={version.id} className="text-xs border rounded px-2 py-1">
+                      <div className="flex items-center justify-between">
+                        <span>V{version.versionNo}</span>
+                        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => rollbackMutation.mutate({ generationId: selectedHistory.id, versionNo: version.versionNo })}>回滚</Button>
+                      </div>
+                      <div className="text-muted-foreground">{version.changeSummary || "-"}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="prose prose-sm max-w-none">
               <Streamdown>{selectedHistory.content}</Streamdown>

@@ -31,6 +31,7 @@ export type InsertUser = typeof users.$inferInsert;
 export const knowledgeFiles = mysqlTable("knowledge_files", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(), // Foreign key to users
+  folderId: int("folderId"), // Optional folder, null = root
   fileName: varchar("fileName", { length: 255 }).notNull(),
   fileKey: varchar("fileKey", { length: 512 }).notNull(), // S3 key
   fileUrl: text("fileUrl").notNull(), // S3 URL
@@ -101,6 +102,7 @@ export const resourceTypeEnum = mysqlEnum("resourceType", [
 export const generationHistory = mysqlTable("generation_history", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
+  folderId: int("folderId"), // Optional folder, null = root
   resourceType: resourceTypeEnum.notNull(),
   title: varchar("title", { length: 255 }).notNull(),
   prompt: text("prompt").notNull(), // User input/requirements
@@ -119,6 +121,68 @@ export const generationHistory = mysqlTable("generation_history", {
 
 export type GenerationHistory = typeof generationHistory.$inferSelect;
 export type InsertGenerationHistory = typeof generationHistory.$inferInsert;
+
+/**
+ * User-scoped folder tree for organizing knowledge and generated resources.
+ */
+export const folders = mysqlTable("folders", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  parentId: int("parentId"), // Supports parent-child hierarchy
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Folder = typeof folders.$inferSelect;
+export type InsertFolder = typeof folders.$inferInsert;
+
+/**
+ * Reusable tags and resource-tag mappings for multi-dimensional retrieval.
+ */
+export const resourceTags = mysqlTable("resource_tags", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 128 }).notNull(),
+  color: varchar("color", { length: 32 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type ResourceTag = typeof resourceTags.$inferSelect;
+export type InsertResourceTag = typeof resourceTags.$inferInsert;
+
+export const knowledgeFileTags = mysqlTable("knowledge_file_tags", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  knowledgeFileId: int("knowledgeFileId").notNull(),
+  tagId: int("tagId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const generationHistoryTags = mysqlTable("generation_history_tags", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  generationId: int("generationId").notNull(),
+  tagId: int("tagId").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+/**
+ * Immutable version snapshots for generated content edits and rollback auditing.
+ */
+export const generationHistoryVersions = mysqlTable("generation_history_versions", {
+  id: int("id").autoincrement().primaryKey(),
+  generationId: int("generationId").notNull(),
+  versionNo: int("versionNo").notNull(),
+  contentSnapshot: text("contentSnapshot").notNull(),
+  contentDiff: text("contentDiff"), // Optional unified diff
+  editedBy: int("editedBy").notNull(),
+  changeSummary: text("changeSummary"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type GenerationHistoryVersion = typeof generationHistoryVersions.$inferSelect;
+export type InsertGenerationHistoryVersion = typeof generationHistoryVersions.$inferInsert;
 
 export const exportTypeEnum = mysqlEnum("exportType", ["pptx", "docx", "pdf"]);
 export const exportStatusEnum = mysqlEnum("exportStatus", ["processing", "completed", "failed"]);
