@@ -47,13 +47,156 @@ async function extractDocxText(buffer: Buffer): Promise<string> {
   return result.value;
 }
 
+async function extractXlsxText(buffer: Buffer): Promise<string> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const lines: string[] = [];
+  for (const sheetName of workbook.SheetNames) {
+    lines.push(`[${sheetName}]`);
+    const sheet = workbook.Sheets[sheetName];
+    const csv = XLSX.utils.sheet_to_csv(sheet);
+    lines.push(csv);
+  }
+  return lines.join("\n");
+}
+
+async function extractPptxText(buffer: Buffer): Promise<string> {
+  // PPTX is a ZIP containing XML slides. Extract text from slide XML files.
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(buffer);
+  const lines: string[] = [];
+
+  const slideFiles = Object.keys(zip.files)
+    .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((a, b) => {
+      const numA = parseInt(a.match(/slide(\d+)/)?.[1] || "0");
+      const numB = parseInt(b.match(/slide(\d+)/)?.[1] || "0");
+      return numA - numB;
+    });
+
+  for (const slideFile of slideFiles) {
+    const xml = await zip.files[slideFile].async("text");
+    // Extract text content from XML tags like <a:t>text</a:t>
+    const textMatches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g);
+    if (textMatches) {
+      const slideTexts = textMatches.map(m => m.replace(/<[^>]+>/g, ""));
+      lines.push(slideTexts.join(" "));
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function extractHtmlText(buffer: Buffer): string {
+  const html = buffer.toString("utf-8");
+  // Strip HTML tags and decode common entities
+  return html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractPlainText(buffer: Buffer): string {
   return buffer.toString("utf-8");
 }
 
+function matchesType(
+  mimeType: string,
+  fileName: string,
+  mimeTypes: string[],
+  extensions: string[]
+): boolean {
+  if (mimeTypes.some(m => mimeType === m)) return true;
+  const lower = fileName.toLowerCase();
+  return extensions.some(ext => lower.endsWith(ext));
+}
+
+async function extractFromBuffer(
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string
+): Promise<string> {
+  // PDF
+  if (matchesType(mimeType, fileName, ["application/pdf"], [".pdf"])) {
+    return extractPdfText(buffer);
+  }
+
+  // DOCX
+  if (
+    matchesType(mimeType, fileName,
+      ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+      [".docx"])
+  ) {
+    return extractDocxText(buffer);
+  }
+
+  // DOC (limited support)
+  if (matchesType(mimeType, fileName, ["application/msword"], [".doc"])) {
+    return extractPlainText(buffer);
+  }
+
+  // XLSX / XLS
+  if (
+    matchesType(mimeType, fileName,
+      [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+      ],
+      [".xlsx", ".xls"])
+  ) {
+    return extractXlsxText(buffer);
+  }
+
+  // PPTX
+  if (
+    matchesType(mimeType, fileName,
+      ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+      [".pptx"])
+  ) {
+    return extractPptxText(buffer);
+  }
+
+  // PPT (legacy, limited support)
+  if (matchesType(mimeType, fileName, ["application/vnd.ms-powerpoint"], [".ppt"])) {
+    return extractPlainText(buffer);
+  }
+
+  // CSV
+  if (matchesType(mimeType, fileName, ["text/csv"], [".csv"])) {
+    return extractPlainText(buffer);
+  }
+
+  // HTML
+  if (matchesType(mimeType, fileName, ["text/html"], [".html", ".htm"])) {
+    return extractHtmlText(buffer);
+  }
+
+  // Plain text, Markdown, JSON, XML, YAML, RTF, etc.
+  if (
+    mimeType.startsWith("text/") ||
+    matchesType(mimeType, fileName,
+      ["application/json", "application/xml", "application/rtf", "application/x-yaml"],
+      [".txt", ".md", ".json", ".xml", ".yaml", ".yml", ".rtf"])
+  ) {
+    return extractPlainText(buffer);
+  }
+
+  // Unsupported types (images, etc.)
+  return "";
+}
+
 /**
  * Extract text content from a file stored in S3.
- * Supports PDF, DOCX, and plain text files.
+ * Supports PDF, DOCX, DOC, XLSX, XLS, PPTX, CSV, HTML, Markdown,
+ * JSON, XML, YAML, RTF, and plain text files.
  */
 export async function extractTextFromFile(
   fileKey: string,
@@ -61,36 +204,7 @@ export async function extractTextFromFile(
   fileName: string
 ): Promise<string> {
   const buffer = await fetchFileFromS3(fileKey);
-
-  if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-    return extractPdfText(buffer);
-  }
-
-  if (
-    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    fileName.endsWith(".docx")
-  ) {
-    return extractDocxText(buffer);
-  }
-
-  if (
-    mimeType === "application/msword" ||
-    fileName.endsWith(".doc")
-  ) {
-    // .doc format is not well supported; attempt plain text extraction
-    return extractPlainText(buffer);
-  }
-
-  if (
-    mimeType.startsWith("text/") ||
-    fileName.endsWith(".txt") ||
-    fileName.endsWith(".md")
-  ) {
-    return extractPlainText(buffer);
-  }
-
-  // For unsupported types (images, etc.), return empty
-  return "";
+  return extractFromBuffer(buffer, mimeType, fileName);
 }
 
 /**
@@ -101,31 +215,5 @@ export async function extractTextFromBuffer(
   mimeType: string,
   fileName: string
 ): Promise<string> {
-  if (mimeType === "application/pdf" || fileName.endsWith(".pdf")) {
-    return extractPdfText(buffer);
-  }
-
-  if (
-    mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-    fileName.endsWith(".docx")
-  ) {
-    return extractDocxText(buffer);
-  }
-
-  if (
-    mimeType === "application/msword" ||
-    fileName.endsWith(".doc")
-  ) {
-    return extractPlainText(buffer);
-  }
-
-  if (
-    mimeType.startsWith("text/") ||
-    fileName.endsWith(".txt") ||
-    fileName.endsWith(".md")
-  ) {
-    return extractPlainText(buffer);
-  }
-
-  return "";
+  return extractFromBuffer(buffer, mimeType, fileName);
 }

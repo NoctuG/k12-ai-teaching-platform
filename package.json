@@ -59,6 +59,7 @@
     "framer-motion": "^12.23.22",
     "input-otp": "^1.4.2",
     "jose": "6.1.0",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.453.0",
     "mammoth": "^1.11.0",
     "mysql2": "^3.15.0",
@@ -78,6 +79,7 @@
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
     "wouter": "^3.3.5",
+    "xlsx": "^0.18.5",
     "zod": "^4.1.12"
   },
   "devDependencies": {

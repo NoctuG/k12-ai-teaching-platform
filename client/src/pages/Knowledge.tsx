@@ -56,8 +56,8 @@ export default function Knowledge() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error("文件大小不能超过10MB");
+    if (file.size > 50 * 1024 * 1024) {
+      toast.error("文件大小不能超过50MB");
       return;
     }
 
@@ -107,11 +107,11 @@ export default function Knowledge() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2"><Upload className="w-5 h-5 text-primary" />上传文件</CardTitle>
-                <CardDescription>上传到当前目录并附加当前标签筛选</CardDescription>
+                <CardDescription>支持 PDF、Word、Excel、PPT、TXT、Markdown、CSV、HTML、JSON、XML、YAML、图片等格式，最大 50MB</CardDescription>
               </CardHeader>
               <CardContent>
                 <Label htmlFor="file">选择文件</Label>
-                <Input id="file" type="file" onChange={handleFileUpload} disabled={uploading} accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png" />
+                <Input id="file" type="file" onChange={handleFileUpload} disabled={uploading} accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.pptx,.ppt,.xlsx,.xls,.csv,.md,.html,.htm,.rtf,.json,.xml,.yaml,.yml,.epub" />
                 {uploading && <div className="flex items-center gap-2 text-sm mt-2"><Loader2 className="w-4 h-4 animate-spin" />上传中...</div>}
               </CardContent>
             </Card>
