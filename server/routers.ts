@@ -11,6 +11,8 @@ import { generateImage } from "./_core/imageGeneration";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { extractTextFromBuffer } from "./_core/textExtraction";
 import { splitTextIntoChunks } from "./_core/chunking";
+import { embedText } from "./_core/embedding";
+import { ENV } from "./_core/env";
 import {
   retrieveRelevantChunks,
   formatRetrievalContext,
@@ -213,15 +215,46 @@ export const appRouter = router({
             const chunks = splitTextIntoChunks(textContent);
 
             if (chunks.length > 0) {
-              await db.createKnowledgeChunks(
-                chunks.map(chunk => ({
-                  knowledgeFileId: fileId,
-                  userId: ctx.user.id,
-                  chunkIndex: chunk.index,
-                  content: chunk.content,
-                  charCount: chunk.charCount,
-                }))
+              const chunksWithEmbeddings = await Promise.all(
+                chunks.map(async chunk => {
+                  try {
+                    const embedding = await embedText(chunk.content);
+                    return {
+                      knowledgeFileId: fileId,
+                      userId: ctx.user.id,
+                      chunkIndex: chunk.index,
+                      content: chunk.content,
+                      charCount: chunk.charCount,
+                      embeddingModel: ENV.embeddingModel,
+                      embeddingDim: embedding.length,
+                      embedding,
+                      embeddingStatus: "completed" as const,
+                      embeddingError: null,
+                    };
+                  } catch (error) {
+                    console.warn("[RAG] Chunk embedding failed", {
+                      fileId,
+                      chunkIndex: chunk.index,
+                      error,
+                    });
+                    return {
+                      knowledgeFileId: fileId,
+                      userId: ctx.user.id,
+                      chunkIndex: chunk.index,
+                      content: chunk.content,
+                      charCount: chunk.charCount,
+                      embeddingModel: ENV.embeddingModel,
+                      embeddingDim: null,
+                      embedding: null,
+                      embeddingStatus: "failed" as const,
+                      embeddingError:
+                        error instanceof Error ? error.message : "Embedding failed",
+                    };
+                  }
+                })
               );
+
+              await db.createKnowledgeChunks(chunksWithEmbeddings);
             }
 
             await db.updateKnowledgeFile(fileId, {
@@ -277,8 +310,76 @@ export const appRouter = router({
         }
 
         try {
-          const { retrievalSnapshot, systemPrompt, userMessage } =
-            await prepareGenerationContext(input);
+          // Build context from knowledge files using RAG retrieval
+          let knowledgeContext = "";
+          let retrievalSnapshot = "";
+          if (input.knowledgeFileIds && input.knowledgeFileIds.length > 0) {
+            const files = await db.getKnowledgeFilesByIds(
+              input.knowledgeFileIds
+            );
+            const fileNameMap: Record<number, string> = {};
+            for (const f of files) {
+              fileNameMap[f.id] = f.fileName;
+            }
+
+            const retrievalResult = await retrieveRelevantChunks(
+              input.knowledgeFileIds,
+              input.prompt,
+              fileNameMap
+            );
+            const { chunks: retrievedChunks, mode: retrievalMode } = retrievalResult;
+
+            if (retrievedChunks.length > 0) {
+              knowledgeContext = formatRetrievalContext(retrievedChunks);
+              // Save retrieval snapshot for traceability
+              retrievalSnapshot = JSON.stringify(
+                retrievedChunks.map(c => ({
+                  file: c.fileName,
+                  chunk: c.chunkIndex,
+                  score: Math.round(c.score * 1000) / 1000,
+                  retrievalMode,
+                  scoreBreakdown: {
+                    vector: Math.round(c.vectorScore * 1000) / 1000,
+                    keyword: Math.round(c.keywordScore * 1000) / 1000,
+                    final: Math.round(c.score * 1000) / 1000,
+                  },
+                  preview: c.content.slice(0, 100),
+                }))
+              );
+            } else {
+              // Fallback: if no chunks exist yet (files still processing), use filenames
+              knowledgeContext = files
+                .map(f => `参考资料: ${f.fileName}`)
+                .join("\n");
+            }
+          }
+
+          // Build the system prompt, with optional curriculum alignment
+          let systemPrompt = getSystemPromptForResourceType(input.resourceType);
+          if (input.parameters?.alignCurriculumStandards) {
+            systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
+          }
+
+          const structuredParameterLines = Object.entries(
+            input.parameters || {}
+          )
+            .filter(
+              ([key, value]) =>
+                value !== undefined && value !== null && value !== ""
+            )
+            .map(
+              ([key, value]) =>
+                `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`
+            );
+
+          if (structuredParameterLines.length > 0) {
+            systemPrompt += `\n\n【结构化参数约束（必须显式执行）】\n${structuredParameterLines.join("\n")}\n请将以上参数作为硬约束写入生成内容，不得忽略。`;
+          }
+
+          // Generate content using LLM with RAG context
+          const userMessage = knowledgeContext
+            ? `${knowledgeContext}\n\n---\n\n${input.prompt}`
+            : input.prompt;
 
           const response = await invokeLLM({
             messages: [
