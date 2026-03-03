@@ -39,7 +39,79 @@ const allResourceTypes = [
   "differentiated_reading",
 ] as const;
 
-const resourceTypeZod = z.enum(allResourceTypes);
+export const resourceTypeZod = z.enum(allResourceTypes);
+
+export const generationInputSchema = z.object({
+  resourceType: resourceTypeZod,
+  title: z.string(),
+  prompt: z.string(),
+  parameters: z.record(z.string(), z.any()).optional(),
+  knowledgeFileIds: z.array(z.number()).optional(),
+  folderId: z.number().optional(),
+  tagIds: z.array(z.number()).optional(),
+});
+
+export type GenerationInput = z.infer<typeof generationInputSchema>;
+
+export async function prepareGenerationContext(input: GenerationInput) {
+  let knowledgeContext = "";
+  let retrievalSnapshot = "";
+  if (input.knowledgeFileIds && input.knowledgeFileIds.length > 0) {
+    const files = await db.getKnowledgeFilesByIds(input.knowledgeFileIds);
+    const fileNameMap: Record<number, string> = {};
+    for (const f of files) {
+      fileNameMap[f.id] = f.fileName;
+    }
+
+    const retrievedChunks = await retrieveRelevantChunks(
+      input.knowledgeFileIds,
+      input.prompt,
+      fileNameMap
+    );
+
+    if (retrievedChunks.length > 0) {
+      knowledgeContext = formatRetrievalContext(retrievedChunks);
+      retrievalSnapshot = JSON.stringify(
+        retrievedChunks.map(c => ({
+          file: c.fileName,
+          chunk: c.chunkIndex,
+          score: Math.round(c.score * 1000) / 1000,
+          preview: c.content.slice(0, 100),
+        }))
+      );
+    } else {
+      knowledgeContext = files.map(f => `参考资料: ${f.fileName}`).join("\n");
+    }
+  }
+
+  let systemPrompt = getSystemPromptForResourceType(input.resourceType);
+  if (input.parameters?.alignCurriculumStandards) {
+    systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
+  }
+
+  const structuredParameterLines = Object.entries(input.parameters || {})
+    .filter(
+      ([, value]) => value !== undefined && value !== null && value !== ""
+    )
+    .map(
+      ([key, value]) =>
+        `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`
+    );
+
+  if (structuredParameterLines.length > 0) {
+    systemPrompt += `\n\n【结构化参数约束（必须显式执行）】\n${structuredParameterLines.join("\n")}\n请将以上参数作为硬约束写入生成内容，不得忽略。`;
+  }
+
+  const userMessage = knowledgeContext
+    ? `${knowledgeContext}\n\n---\n\n${input.prompt}`
+    : input.prompt;
+
+  return {
+    retrievalSnapshot,
+    systemPrompt,
+    userMessage,
+  };
+}
 
 export const appRouter = router({
   system: systemRouter,
@@ -184,17 +256,7 @@ export const appRouter = router({
 
   generation: router({
     generate: protectedProcedure
-      .input(
-        z.object({
-          resourceType: resourceTypeZod,
-          title: z.string(),
-          prompt: z.string(),
-          parameters: z.record(z.string(), z.any()).optional(),
-          knowledgeFileIds: z.array(z.number()).optional(),
-          folderId: z.number().optional(),
-          tagIds: z.array(z.number()).optional(),
-        })
-      )
+      .input(generationInputSchema)
       .mutation(async ({ ctx, input }) => {
         // Create initial record
         const result = await db.createGenerationHistory({
@@ -215,69 +277,8 @@ export const appRouter = router({
         }
 
         try {
-          // Build context from knowledge files using RAG retrieval
-          let knowledgeContext = "";
-          let retrievalSnapshot = "";
-          if (input.knowledgeFileIds && input.knowledgeFileIds.length > 0) {
-            const files = await db.getKnowledgeFilesByIds(
-              input.knowledgeFileIds
-            );
-            const fileNameMap: Record<number, string> = {};
-            for (const f of files) {
-              fileNameMap[f.id] = f.fileName;
-            }
-
-            const retrievedChunks = await retrieveRelevantChunks(
-              input.knowledgeFileIds,
-              input.prompt,
-              fileNameMap
-            );
-
-            if (retrievedChunks.length > 0) {
-              knowledgeContext = formatRetrievalContext(retrievedChunks);
-              // Save retrieval snapshot for traceability
-              retrievalSnapshot = JSON.stringify(
-                retrievedChunks.map(c => ({
-                  file: c.fileName,
-                  chunk: c.chunkIndex,
-                  score: Math.round(c.score * 1000) / 1000,
-                  preview: c.content.slice(0, 100),
-                }))
-              );
-            } else {
-              // Fallback: if no chunks exist yet (files still processing), use filenames
-              knowledgeContext = files
-                .map(f => `参考资料: ${f.fileName}`)
-                .join("\n");
-            }
-          }
-
-          // Build the system prompt, with optional curriculum alignment
-          let systemPrompt = getSystemPromptForResourceType(input.resourceType);
-          if (input.parameters?.alignCurriculumStandards) {
-            systemPrompt += `\n\n【课标对齐模式】请在教学目标和教学环节的对应位置，以标签形式标注当前环节培养的"核心素养"（如：[科学思维]、[文化自信]、[语言运用]、[审美创造]、[实践创新]等），确保每个教学环节都能体现课标要求。`;
-          }
-
-          const structuredParameterLines = Object.entries(
-            input.parameters || {}
-          )
-            .filter(
-              ([key, value]) =>
-                value !== undefined && value !== null && value !== ""
-            )
-            .map(
-              ([key, value]) =>
-                `- ${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`
-            );
-
-          if (structuredParameterLines.length > 0) {
-            systemPrompt += `\n\n【结构化参数约束（必须显式执行）】\n${structuredParameterLines.join("\n")}\n请将以上参数作为硬约束写入生成内容，不得忽略。`;
-          }
-
-          // Generate content using LLM with RAG context
-          const userMessage = knowledgeContext
-            ? `${knowledgeContext}\n\n---\n\n${input.prompt}`
-            : input.prompt;
+          const { retrievalSnapshot, systemPrompt, userMessage } =
+            await prepareGenerationContext(input);
 
           const response = await invokeLLM({
             messages: [
