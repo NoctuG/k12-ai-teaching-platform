@@ -6,10 +6,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { trpc } from "@/lib/trpc";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Sparkles, CheckCircle2, Clock, Download, RefreshCcw } from "lucide-react";
 import { Streamdown } from "streamdown";
+import { parseStreamEvent } from "./generateStream";
 
 type AdvancedParameters = {
   teachingModel?: "5E" | "BOPPPS";
@@ -116,6 +117,10 @@ export default function Generate() {
   const [selectedFiles, setSelectedFiles] = useState<number[]>([]);
 
   const [lastHistoryId, setLastHistoryId] = useState<number | null>(null);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamWarning, setStreamWarning] = useState<string | null>(null);
+  const [preferStreaming, setPreferStreaming] = useState(true);
+  const abortRef = useRef<AbortController | null>(null);
   const [exportProgress, setExportProgress] = useState(0);
   const [lastExportPayload, setLastExportPayload] = useState<{ generationHistoryId: number; format: "pptx" | "docx" | "pdf" } | null>(null);
 
@@ -159,6 +164,63 @@ export default function Generate() {
     },
   });
 
+  const streamGenerate = async (payload: any) => {
+    setIsStreaming(true);
+    setStreamWarning(null);
+    setGeneratedContent("");
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const response = await fetch("/api/generation/stream", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      throw new Error(`流式接口不可用（${response.status}）`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    const handleEvent = (rawEvent: string) => {
+      const parsed = parseStreamEvent(rawEvent);
+      if (!parsed) return;
+
+      if (parsed.event === "start") {
+        setLastHistoryId(parsed.payload.historyId ?? null);
+      } else if (parsed.event === "token") {
+        setGeneratedContent(prev => prev + (parsed.payload.delta || ""));
+      } else if (parsed.event === "done") {
+        setGeneratedContent(parsed.payload.content || "");
+        toast.success("流式生成完成");
+      } else if (parsed.event === "error") {
+        throw new Error(parsed.payload.message || "流式生成失败");
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const eventRaw = buffer.slice(0, boundary);
+        if (!eventRaw.startsWith(":")) {
+          handleEvent(eventRaw);
+        }
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+  };
+
   const supportsAdvancedParameters = useMemo(() => {
     return ["courseware", "lesson_plan", "lesson_plan_unit", "interactive_game", "mind_map", "homework", "question_design"].includes(resourceType);
   }, [resourceType]);
@@ -186,7 +248,7 @@ export default function Generate() {
     }
   }, [resourceType, generatedContent]);
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!title.trim()) {
       toast.error("请输入标题");
       return;
@@ -200,7 +262,7 @@ export default function Generate() {
       Object.entries(advancedParameters).filter(([, value]) => value !== undefined && value !== "")
     );
 
-    generateMutation.mutate({
+    const payload = {
       resourceType: resourceType as any,
       title,
       prompt,
@@ -209,7 +271,33 @@ export default function Generate() {
         ...(supportsAdvancedParameters ? compactAdvancedParameters : {}),
       },
       knowledgeFileIds: selectedFiles,
-    });
+    };
+
+    if (preferStreaming) {
+      try {
+        await streamGenerate(payload);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "流式生成失败";
+        setStreamWarning(`流式连接中断，已切换普通模式：${message}`);
+        toast.warning("流式失败，已自动回退普通生成");
+        generateMutation.mutate(payload);
+      } finally {
+        setIsStreaming(false);
+        abortRef.current = null;
+      }
+      return;
+    }
+
+    generateMutation.mutate(payload);
+  };
+
+  const isGenerating = isStreaming || generateMutation.isPending;
+
+  const stopGenerating = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setStreamWarning("已停止生成，可重新发起请求");
   };
 
   const startExport = (format: "pptx" | "docx" | "pdf") => {
@@ -424,13 +512,16 @@ export default function Generate() {
                 </div>
               )}
 
-              <Button
-                onClick={handleGenerate}
-                disabled={generateMutation.isPending}
-                className="w-full"
-                size="lg"
-              >
-                {generateMutation.isPending ? (
+              <div className="flex items-center gap-2">
+                <label className="text-xs flex items-center gap-2">
+                  <input type="checkbox" checked={preferStreaming} onChange={(e) => setPreferStreaming(e.target.checked)} />
+                  默认流式（失败自动回退）
+                </label>
+              </div>
+
+              <div className="flex gap-2">
+                <Button onClick={handleGenerate} disabled={isGenerating} className="w-full" size="lg">
+                {isGenerating ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     生成中...
@@ -441,7 +532,12 @@ export default function Generate() {
                     开始生成
                   </>
                 )}
-              </Button>
+                </Button>
+                {isStreaming && (
+                  <Button type="button" variant="outline" size="lg" onClick={stopGenerating}>停止生成</Button>
+                )}
+              </div>
+              {streamWarning && <p className="text-xs text-amber-600">{streamWarning}</p>}
             </CardContent>
           </Card>
 
@@ -471,7 +567,7 @@ export default function Generate() {
               {exporting && (
                 <div className="mb-4 text-xs text-muted-foreground">导出进度：{exportProgress}%</div>
               )}
-              {generateMutation.isPending ? (
+              {isGenerating ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>

@@ -327,3 +327,156 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   return (await response.json()) as InvokeResult;
 }
+
+export type LLMStreamHandlers = {
+  onStart?: (meta?: Record<string, unknown>) => void;
+  onToken?: (token: string, rawChunk?: unknown) => void;
+  onDone?: (meta?: Record<string, unknown>) => void;
+  onError?: (error: Error) => void;
+  onHeartbeat?: () => void;
+};
+
+export async function invokeLLMStream(
+  params: InvokeParams,
+  handlers: LLMStreamHandlers
+): Promise<void> {
+  assertApiKey();
+
+  const {
+    messages,
+    tools,
+    toolChoice,
+    tool_choice,
+    outputSchema,
+    output_schema,
+    responseFormat,
+    response_format,
+  } = params;
+
+  const payload: Record<string, unknown> = {
+    model: ENV.llmModel,
+    messages: messages.map(normalizeMessage),
+    stream: true,
+  };
+
+  if (tools && tools.length > 0) {
+    payload.tools = tools;
+  }
+
+  const normalizedToolChoice = normalizeToolChoice(
+    toolChoice || tool_choice,
+    tools
+  );
+  if (normalizedToolChoice) {
+    payload.tool_choice = normalizedToolChoice;
+  }
+
+  payload.max_tokens = 32768;
+  payload.thinking = {
+    budget_tokens: 128,
+  };
+
+  const normalizedResponseFormat = normalizeResponseFormat({
+    responseFormat,
+    response_format,
+    outputSchema,
+    output_schema,
+  });
+
+  if (normalizedResponseFormat) {
+    payload.response_format = normalizedResponseFormat;
+  }
+
+  const response = await fetch(resolveApiUrl(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${ENV.geminiApiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `LLM stream invoke failed: ${response.status} ${response.statusText} – ${errorText}`
+    );
+  }
+
+  if (!response.body) {
+    throw new Error("LLM stream response has no body");
+  }
+
+  const decoder = new TextDecoder();
+  const reader = response.body.getReader();
+  let buffer = "";
+  let started = false;
+
+  const flushEvent = (rawEvent: string) => {
+    if (!rawEvent.trim()) return;
+    const lines = rawEvent.split("\n");
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.startsWith(":")) {
+        handlers.onHeartbeat?.();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (dataLines.length === 0) return;
+    const data = dataLines.join("\n");
+
+    if (data === "[DONE]") {
+      handlers.onDone?.();
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(data) as any;
+      if (!started) {
+        started = true;
+        handlers.onStart?.({ id: parsed.id, model: parsed.model });
+      }
+
+      const delta = parsed?.choices?.[0]?.delta;
+      const token = typeof delta?.content === "string" ? delta.content : "";
+      if (token) {
+        handlers.onToken?.(token, parsed);
+      }
+
+      if (parsed?.choices?.[0]?.finish_reason) {
+        handlers.onDone?.({ finishReason: parsed.choices[0].finish_reason });
+      }
+    } catch (error) {
+      handlers.onError?.(
+        error instanceof Error
+          ? error
+          : new Error("Failed to parse stream event payload")
+      );
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const chunk = buffer.slice(0, boundary);
+      flushEvent(chunk);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+    }
+  }
+
+  if (buffer.trim()) {
+    flushEvent(buffer);
+  }
+}
