@@ -12,6 +12,11 @@ export const ENV = {
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   llmBaseUrl: process.env.LLM_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai",
   llmModel: process.env.LLM_MODEL ?? "gemini-2.5-flash",
+  embeddingModel: process.env.EMBEDDING_MODEL ?? "text-embedding-004",
+  embeddingEnabled: (process.env.EMBEDDING_ENABLED ?? "true") === "true",
+  embeddingMaxRetries: Number(process.env.EMBEDDING_MAX_RETRIES ?? 2),
+  embeddingMinIntervalMs: Number(process.env.EMBEDDING_MIN_INTERVAL_MS ?? 100),
+  embeddingBatchSize: Number(process.env.EMBEDDING_BATCH_SIZE ?? 8),
   // Compatibility for modules still using legacy proxy naming
   forgeApiUrl: process.env.FORGE_API_URL ?? process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.FORGE_API_KEY ?? process.env.BUILT_IN_FORGE_API_KEY ?? "",

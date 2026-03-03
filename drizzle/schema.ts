@@ -74,6 +74,17 @@ export const knowledgeChunks = mysqlTable("knowledge_chunks", {
   chunkIndex: int("chunkIndex").notNull(), // Order within the file
   content: text("content").notNull(), // Chunk text content
   charCount: int("charCount").notNull(), // Character count for the chunk
+  embeddingModel: varchar("embeddingModel", { length: 128 }),
+  embeddingDim: int("embeddingDim"),
+  embedding: json("embedding").$type<number[]>(),
+  embeddingStatus: mysqlEnum("embeddingStatus", [
+    "pending",
+    "completed",
+    "failed",
+  ])
+    .default("pending")
+    .notNull(),
+  embeddingError: text("embeddingError"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

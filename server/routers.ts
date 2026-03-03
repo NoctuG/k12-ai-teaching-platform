@@ -11,6 +11,8 @@ import { generateImage } from "./_core/imageGeneration";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import { extractTextFromBuffer } from "./_core/textExtraction";
 import { splitTextIntoChunks } from "./_core/chunking";
+import { embedText } from "./_core/embedding";
+import { ENV } from "./_core/env";
 import {
   retrieveRelevantChunks,
   formatRetrievalContext,
@@ -141,15 +143,46 @@ export const appRouter = router({
             const chunks = splitTextIntoChunks(textContent);
 
             if (chunks.length > 0) {
-              await db.createKnowledgeChunks(
-                chunks.map(chunk => ({
-                  knowledgeFileId: fileId,
-                  userId: ctx.user.id,
-                  chunkIndex: chunk.index,
-                  content: chunk.content,
-                  charCount: chunk.charCount,
-                }))
+              const chunksWithEmbeddings = await Promise.all(
+                chunks.map(async chunk => {
+                  try {
+                    const embedding = await embedText(chunk.content);
+                    return {
+                      knowledgeFileId: fileId,
+                      userId: ctx.user.id,
+                      chunkIndex: chunk.index,
+                      content: chunk.content,
+                      charCount: chunk.charCount,
+                      embeddingModel: ENV.embeddingModel,
+                      embeddingDim: embedding.length,
+                      embedding,
+                      embeddingStatus: "completed" as const,
+                      embeddingError: null,
+                    };
+                  } catch (error) {
+                    console.warn("[RAG] Chunk embedding failed", {
+                      fileId,
+                      chunkIndex: chunk.index,
+                      error,
+                    });
+                    return {
+                      knowledgeFileId: fileId,
+                      userId: ctx.user.id,
+                      chunkIndex: chunk.index,
+                      content: chunk.content,
+                      charCount: chunk.charCount,
+                      embeddingModel: ENV.embeddingModel,
+                      embeddingDim: null,
+                      embedding: null,
+                      embeddingStatus: "failed" as const,
+                      embeddingError:
+                        error instanceof Error ? error.message : "Embedding failed",
+                    };
+                  }
+                })
               );
+
+              await db.createKnowledgeChunks(chunksWithEmbeddings);
             }
 
             await db.updateKnowledgeFile(fileId, {
@@ -227,11 +260,12 @@ export const appRouter = router({
               fileNameMap[f.id] = f.fileName;
             }
 
-            const retrievedChunks = await retrieveRelevantChunks(
+            const retrievalResult = await retrieveRelevantChunks(
               input.knowledgeFileIds,
               input.prompt,
               fileNameMap
             );
+            const { chunks: retrievedChunks, mode: retrievalMode } = retrievalResult;
 
             if (retrievedChunks.length > 0) {
               knowledgeContext = formatRetrievalContext(retrievedChunks);
@@ -241,6 +275,12 @@ export const appRouter = router({
                   file: c.fileName,
                   chunk: c.chunkIndex,
                   score: Math.round(c.score * 1000) / 1000,
+                  retrievalMode,
+                  scoreBreakdown: {
+                    vector: Math.round(c.vectorScore * 1000) / 1000,
+                    keyword: Math.round(c.keywordScore * 1000) / 1000,
+                    final: Math.round(c.score * 1000) / 1000,
+                  },
                   preview: c.content.slice(0, 100),
                 }))
               );
